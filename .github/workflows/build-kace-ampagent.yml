@@ -1,0 +1,62 @@
+name: Build KACE AMP Agent Package
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install Nix and enable flakes
+              uses: cachix/install-nix-action@v27
+              with:
+                  nix_path: nixpkgs=channel:nixos-unstable
+                  extra_config: |
+                      experimental-features = nix-command flakes
+
+            - name: Build kace-ampagent package
+              run: |
+                  pwd
+                  ls -la
+                  nix build .#kace-ampagent --print-build-logs
+
+            - name: Validate NixOS module
+              run: |
+                  pwd
+                  ls -la
+                  mkdir -p temp-nixos-test
+
+                  cat > temp-nixos-test/flake.nix <<'EOF'
+                  { description = "Temporary flake for NixOS module validation";
+                    inputs = {
+                      nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+                      kaceAgent.url = "path:.."; # parent of temp-nixos-test is repo root with your main flake
+                    };
+                    outputs = { self, nixpkgs, kaceAgent, ... }: {
+                      nixosConfigurations.test = nixpkgs.lib.nixosSystem {
+                        system = "x86_64-linux";
+                        specialArgs = { inherit self; };
+                        modules = [
+                          kaceAgent.nixosModules.kace-ampagent
+                          ({ config, lib, pkgs, ... }: {
+                            boot.loader.systemd-boot.enable = lib.mkForce false;
+                            boot.loader.grub.enable = lib.mkForce false;
+                            networking.hostName = "test-kace-ampagent-module";
+                            services.kace-ampagent.enable = true;
+                          })
+                        ];
+                      };
+                    };
+                  }
+                  EOF
+
+                  # Build from repository root pointing into the temporary flake so relative "path:.." resolves correctly
+                  nix build ./temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel --print-build-logs
