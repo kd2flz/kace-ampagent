@@ -1,71 +1,100 @@
-{ stdenvNoCC, lib, dpkg, autoPatchelfHook, makeWrapper, openssl, zlib, curl, util-linux, systemd, gcc, python3, src }:
 
-stdenvNoCC.mkDerivation {
+{ stdenv
+, lib
+, autoPatchelfHook
+, requireFile
+, ...
+}:
+
+let
+  version = "15.0.54";
+  agentFileName = "ampagent-${version}.ubuntu.64.tar.gz";
+
+  agentSrc = requireFile {
+    name = agentFileName;
+    sha256 = "sha256-HrJp31TNW605PL7hjsCvjJFLG9PP94ARvomcpybOwDQ=";
+    message = ''
+      The Quest KACE AMP Agent generic Linux tarball is required but not provided.
+
+      1) Download: ${agentFileName}
+      2) Place at: ~/.cache/nixpkgs/files/${agentFileName}
+         or run:    nix store add-file ${agentFileName}
+      3) Re-run:    nix build .#kace-ampagent
+    '';
+  };
+in
+stdenv.mkDerivation {
   pname = "kace-ampagent";
-  version = "14.1.19";
-  inherit src;
+  inherit version;
+
+  src = agentSrc;
+
+  nativeBuildInputs = [ autoPatchelfHook ];
+
+  # The archive has multiple top-level entries; skip default unpacker.
   dontUnpack = true;
 
-  nativeBuildInputs = [
-    dpkg
-    autoPatchelfHook
-    makeWrapper
-  ];
-
-  buildInputs = [
-    openssl      # libcrypto, libssl
-    zlib         # libz
-    curl         # libcurl
-    util-linux   # libuuid, etc.
-    systemd      # libsystemd (if the agent links to it)
-    gcc.cc.lib   # libstdc++ and libgcc_s
-    python3      # ensure `python`/`python3` is in the runtime closure
-  ];
-
   installPhase = ''
-    mkdir -p $out
-    # Extract the Debian package into $out
-    dpkg-deb -x "$src" "$out"
+    set -euo pipefail
+    runHook preInstall
 
-    # Many .deb files put stuff under usr/; flatten that into $out.
-    if [ -d "$out/usr" ]; then
-      # Move everything from $out/usr/* to $out/
-      shopt -s dotglob
-      mv $out/usr/* $out/
-      rmdir $out/usr || true
-      shopt -u dotglob
+    echo ">>> [kace-ampagent] installPhase: extracting from $src"
+
+    mkdir -p "$out"
+    workdir="$(mktemp -d)"
+
+    case "$src" in
+      *.tar.gz|*.tgz) tar -xzvf "$src" -C "$workdir" ;;
+      *.tar)          tar -xvf  "$src" -C "$workdir" ;;
+      *) echo "ERROR: Unknown archive format: $src" >&2; exit 1 ;;
+    esac
+
+    # Expect 'opt/' at the top level after extraction
+    if [ -d "$workdir/opt" ]; then
+      mkdir -p "$out/opt"
+      cp -r "$workdir/opt/"* "$out/opt/"
+    else
+      echo "ERROR: expected 'opt/' inside the archive but did not find it." >&2
+      echo "Archive top-level contents:" >&2
+      ls -la "$workdir" >&2
+      exit 1
     fi
 
-    # Some agents install binaries under sbin; ensure they are in bin/
-    if [ -d "$out/sbin" ]; then
-      mkdir -p $out/bin
-      shopt -s nullglob
-      mv $out/sbin/* $out/bin/ || true
-      shopt -u nullglob
-      rmdir $out/sbin || true
+    # Convenience wrappers
+    mkdir -p "$out/bin"
+    if [ -x "$out/opt/quest/kace/bin/ampagent" ]; then
+      ln -s "$out/opt/quest/kace/bin/ampagent" "$out/bin/ampagent"
+    else
+      echo "WARNING: ampagent not found at $out/opt/quest/kace/bin/ampagent" >&2
+    fi
+    if [ -x "$out/opt/quest/kace/bin/konea" ]; then
+      ln -s "$out/opt/quest/kace/bin/konea" "$out/bin/konea"
+    else
+      echo "WARNING: konea not found at $out/opt/quest/kace/bin/konea" >&2
     fi
 
-    # Ensure the agent binary is available as $out/bin/ampagent
-    if [ ! -x "$out/bin/ampagent" ]; then
-      BIN_PATH=$(find "$out" -type f -name ampagent -perm -111 | head -n1 || true)
-      if [ -n "$BIN_PATH" ]; then
-        mkdir -p $out/bin
-        ln -s "$BIN_PATH" $out/bin/ampagent
-      fi
-    fi
+    echo ">>> [kace-ampagent] installed files (depth 3):"
+    find "$out" -maxdepth 3 -print
 
-    # Provide a `python` executable for scripts that expect `python`.
-    if command -v python3 >/dev/null 2>&1; then
-      mkdir -p $out/bin
-      ln -sf "$(command -v python3)" "$out/bin/python"
-    fi
+    # IMPORTANT: reset strict modes so strip/fixup hooks don't choke on nounset
+    set +u
+    set +o pipefail
+
+    runHook postInstall
   '';
 
+  # 👇 Add the C++ runtime & glibc so autoPatchelf can satisfy libstdc++/libgcc
+  buildInputs = [
+    stdenv.cc.cc.lib   # provides libstdc++.so.6 and libgcc_s.so.1
+    stdenv.cc.libc     # provides glibc and the dynamic loader
+  ];
+
+  outputs = [ "out" ];
+
   meta = with lib; {
-    description = "Quest KACE SMA AMP Agent repackaged from a Debian .deb for Nix/NixOS";
+    description = "Quest KACE SMA AMP Agent packaged from the generic Linux tarball (requireFile)";
     license = licenses.unfree;
     platforms = [ "x86_64-linux" ];
-    mainProgram = "ampagent";
     maintainers = [ "David Rhoads" ];
   };
 }
