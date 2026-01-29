@@ -3,6 +3,7 @@
 , lib
 , autoPatchelfHook
 , requireFile
+, makeWrapper
 , ...
 }:
 
@@ -29,7 +30,7 @@ stdenv.mkDerivation {
 
   src = agentSrc;
 
-  nativeBuildInputs = [ autoPatchelfHook ];
+  nativeBuildInputs = [ autoPatchelfHook makeWrapper ];
 
   # The archive has multiple top-level entries; skip default unpacker.
   dontUnpack = true;
