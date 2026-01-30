@@ -51,18 +51,6 @@ in
       description = "Extra amp.conf entries to write as key=value lines.";
     };
 
-    execPath = mkOption {
-      type = types.str;
-      default = "${cfg.package}/bin/ampagent";
-      description = "Path to the ampagent executable.";
-    };
-
-    extraArgs = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
-      description = "Extra arguments passed to ampagent at start.";
-    };
-
     environment = mkOption {
       type = types.attrsOf types.str;
       default = { };
@@ -100,7 +88,7 @@ in
     systemd.services.kace-ampagent-setup = {
       description = "Prepare KACE AMP Agent configuration";
       wantedBy = [ "multi-user.target" ];
-      before = [ "kace-ampagent.service" ];
+      before = [ "kace-ampagent-bootup.service" ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = let
@@ -122,20 +110,46 @@ ${confBody}EOF
       };
     };
 
-    systemd.services.kace-ampagent = {
-      description = "Quest KACE AMP Agent";
-      after = [ "network-online.target" "kace-ampagent-setup.service" ];
-      wants = [ "network-online.target" ];
+    # AMPAgentBootup: run boot scripts (per KACE generic Linux guidelines)
+    systemd.services.kace-ampagent-bootup = {
+      description = "KACE AMP Agent boot scripts";
+      before = [ "multi-user.target" "graphical.target" ];
+      after = [ "kace-ampagent-setup.service" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
-        Type = "simple";
+        Type = "forking";
+        Restart = "no";
+        TimeoutSec = "5min";
+        RemainAfterExit = true;
+        SuccessExitStatus = [ "5" "6" ];
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        Restart = "on-failure";
-        RestartSec = "30s";
         Environment = mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
-        ExecStart = lib.escapeShellArgs ([ cfg.execPath ] ++ cfg.extraArgs);
+        ExecStart = "/opt/quest/kace/bin/AMPAgentBootup start";
+        ExecStop = "/opt/quest/kace/bin/AMPAgentBootup stop";
+      };
+    };
+
+    # AMPAgent: start konea and AMPWatchDog via AMPctl (per KACE generic Linux guidelines)
+    systemd.services.kace-ampagent = {
+      description = "Quest KACE AMP Agent (konea and AMPWatchDog)";
+      before = [ "multi-user.target" "graphical.target" ];
+      after = [ "remote-fs.target" "dbus.service" "kace-ampagent-setup.service" "kace-ampagent-bootup.service" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "forking";
+        Restart = "no";
+        TimeoutSec = "5min";
+        RemainAfterExit = true;
+        SuccessExitStatus = [ "5" "6" ];
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
+        ExecStart = "/opt/quest/kace/bin/AMPctl start";
+        ExecStop = "/opt/quest/kace/bin/AMPctl stop";
       };
     };
   };

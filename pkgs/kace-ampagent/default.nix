@@ -61,17 +61,16 @@ stdenv.mkDerivation {
       exit 1
     fi
 
-    # Convenience wrappers
+    # Convenience wrappers (generic Linux tarball uses AMPctl/AMPAgentBootup, not ampagent)
     mkdir -p "$out/bin"
-    if [ -x "$out/opt/quest/kace/bin/ampagent" ]; then
-      ln -s "$out/opt/quest/kace/bin/ampagent" "$out/bin/ampagent"
-    else
-      echo "WARNING: ampagent not found at $out/opt/quest/kace/bin/ampagent" >&2
+    if [ -x "$out/opt/quest/kace/bin/AMPctl" ]; then
+      ln -s "$out/opt/quest/kace/bin/AMPctl" "$out/bin/AMPctl"
+    fi
+    if [ -x "$out/opt/quest/kace/bin/AMPAgentBootup" ]; then
+      ln -s "$out/opt/quest/kace/bin/AMPAgentBootup" "$out/bin/AMPAgentBootup"
     fi
     if [ -x "$out/opt/quest/kace/bin/konea" ]; then
       ln -s "$out/opt/quest/kace/bin/konea" "$out/bin/konea"
-    else
-      echo "WARNING: konea not found at $out/opt/quest/kace/bin/konea" >&2
     fi
 
     echo ">>> [kace-ampagent] installed files (depth 3):"

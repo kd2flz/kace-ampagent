@@ -77,10 +77,8 @@ nix build .#kace-ampagent
 
 ## Module Options
 
--   `services.kace-ampagent.enable`: Enable the KACE AMP Agent service (boolean, default `false`).
+-   `services.kace-ampagent.enable`: Enable the KACE AMP Agent (boolean, default `false`). When enabled, two systemd services are started: `kace-ampagent-bootup` (AMPAgentBootup) and `kace-ampagent` (AMPctl, which starts konea and AMPWatchDog), matching the generic Linux guidelines.
 -   `services.kace-ampagent.package`: The Nix package providing the KACE agent binaries (package, defaults to `pkgs.kace-ampagent`).
--   `services.kace-ampagent.execPath`: Path to the `ampagent` binary (string, default `${package}/bin/ampagent`).
--   `services.kace-ampagent.extraArgs`: A list of extra arguments passed to the `ampagent` executable (list of strings, default `[]`).
 -   `services.kace-ampagent.dataDir`: The directory where the agent stores its data (string, default `/var/quest/kace`).
 -   `services.kace-ampagent.logDir`: The directory where the agent stores its logs (string, default `/var/log/quest/kace`).
 -   `services.kace-ampagent.environment`: An attribute set of extra environment variables for the agent (attrset, default `{}`).
@@ -99,14 +97,10 @@ services.kace-ampagent = {
     KACE_TOKEN = "your-enroll-token"; # If using token-based enrollment
     # Other settings like CERT_VALIDATION, etc.
   };
-  # If the agent expects to run from /opt/quest/kace, and you've linked it:
-  # execPath = "/opt/quest/kace/bin/ampagent";
-  # Some agent builds might require an explicit "start" argument:
-  # extraArgs = [ "start" ];
 };
 ```
 
 ## Notes
 
--   The KACE agent often expects its files under `/opt/quest/kace`. The module creates a symlink to the package content at `/opt/quest/kace` by default (`services.kace-ampagent.linkOptPath = true;`) for compatibility.
--   Depending on your KACE SMA configuration and agent version, you might need to adjust `extraArgs` or perform a manual enrollment step after the service starts to fully configure the agent.
+-   The KACE agent expects its files under `/opt/quest/kace`. The module creates a symlink to the package content at `/opt/quest/kace` by default (`services.kace-ampagent.linkOptPath = true;`). The services run `/opt/quest/kace/bin/AMPAgentBootup` and `/opt/quest/kace/bin/AMPctl` per the generic Linux guidelines.
+-   Depending on your KACE SMA configuration and agent version, you may need to perform a manual enrollment step after the services start to fully configure the agent.
