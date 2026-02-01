@@ -17,7 +17,7 @@ let
     message = ''
       The Quest KACE AMP Agent generic Linux tarball is required but not provided.
 
-      1) Download: ${agentFileName}
+      1) Download: ${agentFileName} - see https://support.quest.com/kb/4272341/how-to-find-and-install-the-generic-linux-agent-for-sma
       2) Place at: ~/.cache/nixpkgs/files/${agentFileName}
          or run:    nix store add-file ${agentFileName}
       3) Re-run:    nix build .#kace-ampagent
@@ -61,17 +61,16 @@ stdenv.mkDerivation {
       exit 1
     fi
 
-    # Convenience wrappers
+    # Convenience wrappers (generic Linux tarball uses AMPctl/AMPAgentBootup, not ampagent)
     mkdir -p "$out/bin"
-    if [ -x "$out/opt/quest/kace/bin/ampagent" ]; then
-      ln -s "$out/opt/quest/kace/bin/ampagent" "$out/bin/ampagent"
-    else
-      echo "WARNING: ampagent not found at $out/opt/quest/kace/bin/ampagent" >&2
+    if [ -x "$out/opt/quest/kace/bin/AMPctl" ]; then
+      ln -s "$out/opt/quest/kace/bin/AMPctl" "$out/bin/AMPctl"
+    fi
+    if [ -x "$out/opt/quest/kace/bin/AMPAgentBootup" ]; then
+      ln -s "$out/opt/quest/kace/bin/AMPAgentBootup" "$out/bin/AMPAgentBootup"
     fi
     if [ -x "$out/opt/quest/kace/bin/konea" ]; then
       ln -s "$out/opt/quest/kace/bin/konea" "$out/bin/konea"
-    else
-      echo "WARNING: konea not found at $out/opt/quest/kace/bin/konea" >&2
     fi
 
     echo ">>> [kace-ampagent] installed files (depth 3):"
