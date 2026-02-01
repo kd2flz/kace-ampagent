@@ -44,28 +44,33 @@ Once the tarball is correctly placed or added to the store, Nix will be able to 
 
 ## How to Use (NixOS Config with Flakes)
 
-In your system flake, add this flake as an input and use the exported module and package. Example snippet for `flake.nix` in your system repo:
+1. **Add this flake as an input** in your system flake (e.g. `flake.nix`):
 
 ```nix
 inputs = {
-  nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11"; # Or your desired Nixpkgs channel
-  kace-ampagent.url = "github:kd2flz/kace-ampagent/main"; # Or your fork/branch
-};
-
-outputs = { self, nixpkgs, kace-ampagent, ... }:
-{
-  nixosModules = {
-    myHost = import ./configuration.nix; # typical usage
-  };
-
-  # In your configuration.nix or modules list, import the module:
-  # imports = [ kace-ampagent.nixosModules.kace-ampagent ];
-
-  # Then configure options (see Module Options below):
-  # services.kace-ampagent.enable = true;
-  # services.kace-ampagent.package = kace-ampagent.packages.x86_64-linux.kace-ampagent;
+  nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11"; # or your channel
+  kace-ampagent.url = "github:kd2flz/kace-ampagent/main"; # or your fork/branch
 };
 ```
+
+2. **Import the NixOS module** in your system configuration. The module brings in the service and registers an overlay so `pkgs.kace-ampagent` is built with your system’s nixpkgs (same glibc, no need to pass the flake in `specialArgs`):
+
+```nix
+# In configuration.nix or wherever you list modules:
+imports = [ kace-ampagent.nixosModules.kace-ampagent ];
+```
+
+3. **Enable and configure the agent** (see Module Options below). Do **not** set `services.kace-ampagent.package` unless you have a specific reason: the default package comes from the overlay and is built with the same nixpkgs as the rest of your system, which avoids glibc mismatches and keeps your config independent of `inputs.kace-ampagent` in scope.
+
+```nix
+services.kace-ampagent = {
+  enable = true;
+  host = "kbox.example.com";
+  # ampConf = { ... };  # optional
+};
+```
+
+You do not need to reference `kace-ampagent` in your flake `outputs` or `specialArgs`; the module is self-contained once imported.
 
 ## Local Build
 
@@ -78,7 +83,7 @@ nix build .#kace-ampagent
 ## Module Options
 
 -   `services.kace-ampagent.enable`: Enable the KACE AMP Agent (boolean, default `false`). When enabled, two systemd services are started: `kace-ampagent-bootup` (AMPAgentBootup) and `kace-ampagent` (AMPctl, which starts konea and AMPWatchDog), matching the generic Linux guidelines.
--   `services.kace-ampagent.package`: The Nix package providing the KACE agent binaries (package, defaults to `pkgs.kace-ampagent`).
+-   `services.kace-ampagent.package`: The Nix package providing the KACE agent binaries (package, default: `pkgs.kace-ampagent` from the overlay). Leave unset so the module builds the package with your system’s nixpkgs; override only if you need a different source.
 -   `services.kace-ampagent.dataDir`: The directory where the agent stores its data (string, default `/var/quest/kace`).
 -   `services.kace-ampagent.logDir`: The directory where the agent stores its logs (string, default `/var/log/quest/kace`).
 -   `services.kace-ampagent.environment`: An attribute set of extra environment variables for the agent (attrset, default `{}`).
