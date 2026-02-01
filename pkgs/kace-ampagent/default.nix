@@ -12,7 +12,7 @@ let
   agentFileName = "ampagent-${version}.ubuntu.64.tar.gz";
 
   # Minimal LSB init-functions for NixOS (scripts expect /lib/lsb/init-functions)
-  lsbInitFunctions = stdenv.writeText "lsb-init-functions" ''
+  lsbInitFunctions = builtins.toFile "lsb-init-functions" ''
     # Minimal stub for LSB init-functions (NixOS has no /lib/lsb/)
     log_success_msg() { echo "$*"; }
     log_failure_msg() { echo "$*" >&2; }
