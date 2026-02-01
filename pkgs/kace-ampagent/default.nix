@@ -11,6 +11,59 @@ let
   version = "15.0.54";
   agentFileName = "ampagent-${version}.ubuntu.64.tar.gz";
 
+  # Minimal LSB init-functions for NixOS (scripts expect /lib/lsb/init-functions)
+  lsbInitFunctions = stdenv.writeText "lsb-init-functions" ''
+    # Minimal stub for LSB init-functions (NixOS has no /lib/lsb/)
+    log_success_msg() { echo "$*"; }
+    log_failure_msg() { echo "$*" >&2; }
+    log_warning_msg() { echo "$*" >&2; }
+    log_begin_msg() { echo "$*"; }
+    log_end_msg() { echo "$*"; }
+    log_action_begin_msg() { echo "$*"; }
+    log_action_cont_msg() { echo "$*"; }
+    log_action_end_msg() { echo "$*"; }
+    log_daemon_msg() { echo "$*"; }
+    log_progress_msg() { echo "$*"; }
+
+    pidofproc() {
+      local base="$1"
+      local pidfile="''${2:-/var/run/$base.pid}"
+      [ -f "$pidfile" ] && cat "$pidfile" || true
+    }
+
+    killproc() {
+      local pathname="$1"
+      local sig="''${2:-TERM}"
+      local pidfile=""
+      [ "x$1" = "x-p" ] && { pidfile="$2"; shift 2; }
+      local base="$(basename "$pathname")"
+      local pidf="''${pidfile:-/var/run/$base.pid}"
+      [ -f "$pidf" ] && kill -"$sig" "$(cat "$pidf")" 2>/dev/null || true
+    }
+
+    start_daemon() {
+      local force="" nice="" pidfile="" pathname=""
+      while [ "x$1" != "x" ]; do
+        case "$1" in
+          -f) force=1 ;;
+          -n) shift; nice="-n $1" ;;
+          -p) shift; pidfile="$1" ;;
+          *) pathname="$1"; break ;;
+        esac
+        shift
+      done
+      shift
+      local base="$(basename "$pathname")"
+      local pidf="''${pidfile:-/var/run/$base.pid}"
+      if [ -z "$force" ] && [ -f "$pidf" ]; then
+        local pid="$(cat "$pidf")"
+        [ -d "/proc/$pid" ] 2>/dev/null && return 0
+      fi
+      nohup "$pathname" "$@" </dev/null >/dev/null 2>&1 &
+      echo $! > "$pidf"
+    }
+  '';
+
   agentSrc = requireFile {
     name = agentFileName;
     sha256 = "sha256-HrJp31TNW605PL7hjsCvjJFLG9PP94ARvomcpybOwDQ=";
@@ -18,8 +71,7 @@ let
       The Quest KACE AMP Agent generic Linux tarball is required but not provided.
 
       1) Download: ${agentFileName} - see https://support.quest.com/kb/4272341/how-to-find-and-install-the-generic-linux-agent-for-sma
-      2) Place at: ~/.cache/nixpkgs/files/${agentFileName}
-         or run:    nix store add-file ${agentFileName}
+      2) nix store add-file ${agentFileName}
       3) Re-run:    nix build .#kace-ampagent
     '';
   };
@@ -60,6 +112,17 @@ stdenv.mkDerivation {
       ls -la "$workdir" >&2
       exit 1
     fi
+
+    # Provide LSB init-functions (scripts expect /lib/lsb/init-functions on Debian/Ubuntu)
+    mkdir -p "$out/opt/quest/kace/lib/lsb"
+    cp ${lsbInitFunctions} "$out/opt/quest/kace/lib/lsb/init-functions"
+
+    # Patch scripts to source init-functions from package instead of /lib/lsb
+    for f in "$out/opt/quest/kace/bin"/*; do
+      if [ -f "$f" ] && grep -q '/lib/lsb/init-functions' "$f" 2>/dev/null; then
+        substituteInPlace "$f" --replace '/lib/lsb/init-functions' '"$(dirname "$0")/../lib/lsb/init-functions"'
+      fi
+    done
 
     # Convenience wrappers (generic Linux tarball uses AMPctl/AMPAgentBootup, not ampagent)
     mkdir -p "$out/bin"
