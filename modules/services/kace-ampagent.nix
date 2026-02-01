@@ -126,8 +126,8 @@ ${confBody}EOF
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
         Environment = mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
-        ExecStart = "/opt/quest/kace/bin/AMPAgentBootup start";
-        ExecStop = "/opt/quest/kace/bin/AMPAgentBootup stop";
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPAgentBootup start";
+        ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPAgentBootup stop";
       };
     };
 
@@ -148,8 +148,8 @@ ${confBody}EOF
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
         Environment = mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
-        ExecStart = "/opt/quest/kace/bin/AMPctl start";
-        ExecStop = "/opt/quest/kace/bin/AMPctl stop";
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPctl start";
+        ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPctl stop";
       };
     };
   };
