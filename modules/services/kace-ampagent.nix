@@ -3,6 +3,9 @@
 let
   cfg = config.services.kace-ampagent;
   inherit (lib) mkOption mkEnableOption mkIf types optional mapAttrsToList concatStringsSep;
+  # AMPctl uses killall (psmisc) and /bin/true (coreutils); ensure they are on PATH
+  kacePath = "${pkgs.psmisc}/bin:${pkgs.coreutils}/bin";
+  kaceEnv = [ "PATH=${kacePath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
 in
 {
   options.services.kace-ampagent = {
@@ -125,7 +128,7 @@ ${confBody}EOF
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        Environment = mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
+        Environment = kaceEnv;
         ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPAgentBootup start";
         ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPAgentBootup stop";
       };
@@ -147,7 +150,7 @@ ${confBody}EOF
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        Environment = mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
+        Environment = kaceEnv;
         ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPctl start";
         ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPctl stop";
       };

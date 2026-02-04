@@ -123,6 +123,12 @@ stdenv.mkDerivation {
         substituteInPlace "$f" --replace '/lib/lsb/init-functions' '"$(dirname "$0")/../lib/lsb/init-functions"'
       fi
     done
+    # NixOS has no /bin/true; use true from PATH (coreutils in service Environment)
+    for f in "$out/opt/quest/kace/bin"/*; do
+      if [ -f "$f" ] && grep -q '/bin/true' "$f" 2>/dev/null; then
+        substituteInPlace "$f" --replace '/bin/true' 'true'
+      fi
+    done
 
     # Convenience wrappers (generic Linux tarball uses AMPctl/AMPAgentBootup, not ampagent)
     mkdir -p "$out/bin"
