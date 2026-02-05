@@ -4,6 +4,8 @@
 , autoPatchelfHook
 , requireFile
 , makeWrapper
+, psmisc
+, coreutils
 , ...
 }:
 
@@ -120,19 +122,24 @@ stdenv.mkDerivation {
     # Patch scripts to source init-functions from package instead of /lib/lsb
     for f in "$out/opt/quest/kace/bin"/*; do
       if [ -f "$f" ] && grep -q '/lib/lsb/init-functions' "$f" 2>/dev/null; then
-        substituteInPlace "$f" --replace '/lib/lsb/init-functions' '"$(dirname "$0")/../lib/lsb/init-functions"'
+        substituteInPlace "$f" --replace-warn '/lib/lsb/init-functions' '"$(dirname "$0")/../lib/lsb/init-functions"'
       fi
+    done
+    # Ensure killall (psmisc) and true (coreutils) are on PATH when scripts run (manual or systemd)
+    for f in "$out/opt/quest/kace/bin/AMPctl" "$out/opt/quest/kace/bin/AMPAgentBootup"; do
+      [ -f "$f" ] || continue
+      sed -i '1a export PATH="'${psmisc}'/bin:'${coreutils}'/bin:$PATH"' "$f"
     done
     # NixOS has no /bin/true; use true from PATH (coreutils in service Environment)
     for f in "$out/opt/quest/kace/bin"/*; do
       if [ -f "$f" ] && grep -q '/bin/true' "$f" 2>/dev/null; then
-        substituteInPlace "$f" --replace '/bin/true' 'true'
+        substituteInPlace "$f" --replace-warn '/bin/true' 'true'
       fi
     done
-    # Stop hiding konea/KSchedulerConsole stderr so startup errors show in journalctl
-    for f in "$out/opt/quest/kace/bin/AMPctl" "$out/opt/quest/kace/bin/AMPAgentBootup" 2>/dev/null; do
+    # Stop hiding konea/KSchedulerConsole stderr so startup errors show in journalctl (use sed to avoid shell parsing "2>")
+    for f in "$out/opt/quest/kace/bin/AMPctl" "$out/opt/quest/kace/bin/AMPAgentBootup"; do
       [ -f "$f" ] || continue
-      substituteInPlace "$f" --replace '2> /dev/null || true' '|| true'
+      sed -i 's#2> /dev/null || true#|| true#g' "$f"
     done
 
     # Convenience wrappers (generic Linux tarball uses AMPctl/AMPAgentBootup, not ampagent)
@@ -157,10 +164,12 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
-  # 👇 Add the C++ runtime & glibc so autoPatchelf can satisfy libstdc++/libgcc
+  # Runtime: killall (psmisc), true (coreutils); build: C++ runtime & glibc for autoPatchelf
   buildInputs = [
-    stdenv.cc.cc.lib   # provides libstdc++.so.6 and libgcc_s.so.1
-    stdenv.cc.libc     # provides glibc and the dynamic loader
+    stdenv.cc.cc.lib
+    stdenv.cc.libc
+    psmisc      # killall - used by AMPctl/AMPAgentBootup
+    coreutils   # true - used by AMPctl/AMPAgentBootup
   ];
 
   outputs = [ "out" ];
