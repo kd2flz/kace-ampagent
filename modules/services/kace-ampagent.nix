@@ -2,10 +2,13 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.kace-ampagent;
-  inherit (lib) mkOption mkEnableOption mkIf types optional mapAttrsToList concatStringsSep;
+  inherit (lib) mkOption mkEnableOption mkIf types optional mapAttrsToList concatStringsSep filterAttrs;
   # AMPctl uses killall (psmisc) and /bin/true (coreutils); ensure they are on PATH
   kacePath = "${pkgs.psmisc}/bin:${pkgs.coreutils}/bin";
-  kaceEnv = [ "PATH=${kacePath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
+  # Single PATH entry: required path, then user PATH if set (avoid duplicate PATH in systemd)
+  envWithoutPath = filterAttrs (n: _: n != "PATH") cfg.environment;
+  finalPath = if cfg.environment ? PATH && cfg.environment.PATH != "" then "${kacePath}:${cfg.environment.PATH}" else kacePath;
+  kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 in
 {
   options.services.kace-ampagent = {
@@ -138,7 +141,7 @@ ${confBody}EOF
     systemd.services.kace-ampagent = {
       description = "Quest KACE AMP Agent (konea and AMPWatchDog)";
       before = [ "multi-user.target" "graphical.target" ];
-      after = [ "remote-fs.target" "dbus.service" "kace-ampagent-setup.service" "kace-ampagent-bootup.service" ];
+      after = [ "remote-fs.target" "dbus.service" "kace-ampagent-setup.service" "kace-ampagent-bootup.service" "systemd-tmpfiles-setup.service" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
@@ -151,6 +154,9 @@ ${confBody}EOF
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
         Environment = kaceEnv;
+        # Capture output for debugging (AMPctl redirects stderr, but we might catch startup issues)
+        StandardOutput = "journal";
+        StandardError = "journal";
         ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPctl start";
         ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPctl stop";
       };
