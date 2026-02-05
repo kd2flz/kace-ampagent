@@ -129,6 +129,11 @@ stdenv.mkDerivation {
         substituteInPlace "$f" --replace '/bin/true' 'true'
       fi
     done
+    # Stop hiding konea/KSchedulerConsole stderr so startup errors show in journalctl
+    for f in "$out/opt/quest/kace/bin/AMPctl" "$out/opt/quest/kace/bin/AMPAgentBootup" 2>/dev/null; do
+      [ -f "$f" ] || continue
+      substituteInPlace "$f" --replace '2> /dev/null || true' '|| true'
+    done
 
     # Convenience wrappers (generic Linux tarball uses AMPctl/AMPAgentBootup, not ampagent)
     mkdir -p "$out/bin"
