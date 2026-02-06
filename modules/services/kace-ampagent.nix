@@ -230,7 +230,7 @@ AMP_CONF_EOF
         RemainAfterExit = true;
         ExecStart = "${pkgs.writeShellScript "ampctl-wrapper" ''
           set -euo pipefail
-          case "${1:-}" in
+          case "$1" in
             start)
               systemctl start konea
               systemctl start kschedulerconsole
