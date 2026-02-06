@@ -18,11 +18,8 @@ let
 
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
-  # Helper: create a systemd-safe service for a KACE binary that lacks -start/-stop
-  mkKaceService = name: desc: extraOpts:
-    let
-      bin = "${cfg.package}/opt/quest/kace/bin/${name}";
-    in
+  # Helper: create a systemd service for a KACE binary that supports -start/-stop
+  mkKaceServiceWithFlags = name: desc: extraOpts:
     {
       description = desc;
 
@@ -33,12 +30,47 @@ let
       requires = [ "kace-ampagent-setup.service" ]; # ensure config exists first
 
       serviceConfig = {
-        # If the binary daemonizes (forks), change to Type="forking" and add PIDFile if available.
+        # Binary handles its own daemonization under -start (typical), so keep Type=simple
+        # since we're calling a "controller" mode that returns quickly.
         Type = "simple";
 
+        # Use native KACE flags rather than launching the long-running process directly
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/${name} -start";
+        ExecStop  = "${cfg.package}/opt/quest/kace/bin/${name} -stop";
+
+        # Safety: systemd still handles failures and timeouts
+        Restart = "on-failure";
+        RestartSec = 5;
+        TimeoutStopSec = 30;
+
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+
+        Environment = kaceEnv;
+
+        StandardOutput = "journal";
+        StandardError  = "journal";
+      };
+    } // extraOpts;
+
+  # Helper: create a systemd service for a binary with no control flags (foreground)
+  mkKaceServiceSimple = name: desc: extraOpts:
+    let
+      bin = "${cfg.package}/opt/quest/kace/bin/${name}";
+    in
+    {
+      description = desc;
+
+      wantedBy = [ "multi-user.target" ];
+      after = [ "kace-ampagent-setup.service" "network-online.target" ];
+      wants = [ "network-online.target" ];
+      requires = [ "kace-ampagent-setup.service" ];
+
+      serviceConfig = {
+        Type = "simple";
         ExecStart = bin;
 
-        # Let systemd handle graceful shutdown (TERM then KILL after timeout).
         KillSignal = "SIGTERM";
         KillMode = "control-group";
         TimeoutStopSec = 30;
@@ -183,25 +215,21 @@ AMP_CONF_EOF
       };
     };
 
-    # === Service: konea (main agent) ===
-    systemd.services.konea = mkKaceService "konea" "KACE konea agent" { };
+    # === Service: konea (main agent) — uses native -start/-stop ===
+    systemd.services.konea = mkKaceServiceWithFlags "konea" "KACE konea agent" { };
 
-    # === Service: KSchedulerConsole ===
-    systemd.services.kschedulerconsole = mkKaceService "KSchedulerConsole" "KACE Scheduler Console" {
+    # === Service: KSchedulerConsole — also supports native flags in practice ===
+    systemd.services.kschedulerconsole = mkKaceServiceWithFlags "KSchedulerConsole" "KACE Scheduler Console" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
       wantedBy = [ "multi-user.target" ];
     };
 
     # === Optional: AMPWatchDog as native systemd service (no cron) ===
-    systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceService "AMPWatchDog" "KACE Watchdog Service" {
+    # If your AMPWatchDog supports -start/-stop, you can swap to mkKaceServiceWithFlags.
+    systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceServiceSimple "AMPWatchDog" "KACE Watchdog Service" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
-      # If AMPWatchDog daemonizes, you can switch:
-      # serviceConfig = {
-      #   Type = "forking";
-      #   # PIDFile = "${cfg.dataDir}/AMPWatchDog.pid"; # only if it writes one
-      # };
     });
 
     # === Optional: Timer for health checks / cron replacement ===
