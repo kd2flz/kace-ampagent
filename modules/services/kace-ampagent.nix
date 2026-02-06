@@ -1,48 +1,52 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.kace-ampagent;
-  inherit (lib) mkOption mkEnableOption mkIf types mapAttrsToList concatStringsSep optional filterAttrs;
+  inherit (lib)
+    mkOption mkEnableOption mkIf types
+    mapAttrsToList concatStringsSep optional filterAttrs;
 
-  # Ensure required tools are in PATH (psmisc for killall *if needed elsewhere*, coreutils)
-  # But: we won’t use killall in systemd — only for `AMPctl` compatibility layer (see below)
+  # Ensure required tools are in PATH (coreutils at least)
   kacePath = lib.makeBinPath [ pkgs.coreutils ];
 
   # Environment: build systemd-friendly env list
   envWithoutPath = filterAttrs (n: _: n != "PATH") cfg.environment;
-  finalPath = if cfg.environment ? PATH && cfg.environment.PATH != "" then
-                "${kacePath}:${cfg.environment.PATH}"
-              else
-                kacePath;
+
+  finalPath =
+    if (cfg.environment ? PATH) && (cfg.environment.PATH != "")
+    then "${kacePath}:${cfg.environment.PATH}"
+    else kacePath;
+
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
   # Helper: create a systemd-safe service for a KACE binary
-  mkKaceService = name: desc: extraOpts: {
-    description = desc;
-    wantedBy = [ "multi-user.target" ];
-    after = [ "kace-ampagent-setup.service" "network-online.target" ];
-    wants = [ "network-online.target" ];
-    requires = [ "kace-ampagent-setup.service" ]; # ensure config exists
+  mkKaceService = name: desc: extraOpts:
+    {
+      description = desc;
 
-    serviceConfig = {
-      Type = "simple";
-      Restart = "on-failure";
-      RestartSec = 5;
-      TimeoutStopSec = 30; # graceful shutdown timeout
-      User = cfg.user;
-      Group = cfg.group;
-      WorkingDirectory = cfg.dataDir;
-      Environment = kaceEnv;
+      # Unit-level fields
+      wantedBy = [ "multi-user.target" ];
+      after = [ "kace-ampagent-setup.service" "network-online.target" ];
+      wants = [ "network-online.target" ];
+      requires = [ "kace-ampagent-setup.service" ]; # ensure config exists
 
-      # Use native KACE stop/start flags instead of killall
-      ExecStart = "${cfg.package}/opt/quest/kace/bin/${name} -start";
-      ExecStop = "${cfg.package}/opt/quest/kace/bin/${name} -stop";
-      # Optional: if -stop doesn’t exit cleanly, fall back to SIGTERM → SIGKILL
-      # (systemd handles this automatically if service doesn’t exit in TimeoutStopSec)
+      serviceConfig = {
+        Type = "simple";
+        Restart = "on-failure";
+        RestartSec = 5;
+        TimeoutStopSec = 30;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
 
-      StandardOutput = "journal";
-      StandardError = "journal";
+        # Use native KACE stop/start flags instead of killall
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/${name} -start";
+        ExecStop = "${cfg.package}/opt/quest/kace/bin/${name} -stop";
+
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
     } // extraOpts;
-  };
 in
 {
   options.services.kace-ampagent = {
@@ -66,14 +70,15 @@ in
       description = "Group for KACE services.";
     };
 
+    # runtime filesystem paths -> prefer str over path
     dataDir = mkOption {
-      type = types.path;
+      type = types.str;
       default = "/var/quest/kace";
       description = "Working/data directory (amp.conf lives here).";
     };
 
     logDir = mkOption {
-      type = types.path;
+      type = types.str;
       default = "/var/log/quest/kace";
       description = "Log directory.";
     };
@@ -111,7 +116,7 @@ in
   };
 
   config = mkIf cfg.enable {
-    # === Setup directories & symlink ===
+    # === Setup users/groups and directories ===
     users.groups = mkIf (cfg.group != "root") {
       "${cfg.group}" = { };
     };
@@ -136,10 +141,12 @@ in
       description = "Setup KACE AMP configuration";
       wantedBy = [ "multi-user.target" ];
       before = [ "konea.service" "kschedulerconsole.service" ];
+
+      # Run as root so we can chown/chmod deterministically
       serviceConfig = {
         Type = "oneshot";
-        User = cfg.user;
-        Group = cfg.group;
+        User = "root";
+        Group = "root";
         WorkingDirectory = cfg.dataDir;
         ExecStart = let
           confBody =
@@ -148,18 +155,22 @@ in
               concatStringsSep "\n" (mapAttrsToList (n: v: "${n}=${v}") cfg.ampConf) + "\n");
           setupScript = pkgs.writeShellScript "kace-setup" ''
             set -euo pipefail
-            mkdir -p -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.dataDir}
-            mkdir -p -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.logDir}
+
+            # Create directories with owner/group/mode
+            install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.dataDir}
+            install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.logDir}
 
             tmpfile="$(mktemp)"
-            cat > "$tmpfile" <<AMP_CONF_EOF
+            # Use single-quoted heredoc delimiter to avoid runtime expansions
+            cat > "$tmpfile" <<'AMP_CONF_EOF'
 ${confBody}
 AMP_CONF_EOF
             chmod 640 "$tmpfile"
             chown ${cfg.user}:${cfg.group} "$tmpfile"
-            mv "$tmpfile" ${cfg.dataDir}/amp.conf
+            mv -f "$tmpfile" ${cfg.dataDir}/amp.conf
           '';
-        in setupScript;
+        in
+          setupScript;
       };
     };
 
@@ -173,17 +184,18 @@ AMP_CONF_EOF
       wantedBy = [ "multi-user.target" ];
     };
 
-    # === Optional: AMPWatchDog as native systemd service (no cron!) ===
+    # === Optional: AMPWatchDog as native systemd service (no cron) ===
     systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceService "AMPWatchDog" "KACE Watchdog Service" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
-      # If AMPWatchDog is designed to run as daemon (not support -stop), consider:
-      # ExecStart = "...AMPWatchDog --daemon"
-      # and remove ExecStop (systemd SIGTERM handling works)
+      # If AMPWatchDog really wants to daemonize, you could:
+      # serviceConfig = {
+      #   ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPWatchDog --daemon";
+      #   # and drop ExecStop to let systemd handle TERM/KILL
+      # };
     });
 
-    # === Optional: Timer for health checks / crontab replacements ===
-    # Example: if you have KoneaCheckerCrontab for periodic tasks (e.g., every 5 min)
+    # === Optional: Timer for health checks / cron replacement ===
     systemd.timers.konea-checker = mkIf cfg.enableWatchdog {
       description = "Periodic KACE health check";
       wantedBy = [ "timers.target" ];
@@ -192,9 +204,6 @@ AMP_CONF_EOF
         OnUnitActiveSec = "5min";
         AccuracySec = "1m";
         Persistent = true;
-      };
-      unitConfig = {
-        Description = "Trigger Konea health check";
       };
     };
 
@@ -207,12 +216,13 @@ AMP_CONF_EOF
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck"; # or whatever the cmd is
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck";
+        StandardOutput = "journal";
+        StandardError = "journal";
       };
     };
 
-    # === Optional: Legacy AMPctl compatibility (if some external scripts still call it) ===
-    # Creates a thin wrapper around systemd — does NOT use killall
+    # === Optional: Legacy AMPctl compatibility (systemd-backed) ===
     systemd.services.ampctl = {
       description = "Legacy KACE AMPctl compatibility wrapper (systemd-backed)";
       serviceConfig = {
@@ -220,7 +230,7 @@ AMP_CONF_EOF
         RemainAfterExit = true;
         ExecStart = "${pkgs.writeShellScript "ampctl-wrapper" ''
           set -euo pipefail
-          case "$1" in
+          case "${1:-}" in
             start)
               systemctl start konea
               systemctl start kschedulerconsole
@@ -234,14 +244,19 @@ AMP_CONF_EOF
               systemctl restart konea
               ;;
             status)
-              systemctl is-active --quiet konea && exit 0 || exit 1
+              if systemctl is-active --quiet konea; then
+                exit 0
+              else
+                exit 1
+              fi
               ;;
             *)
               echo "Usage: $0 {start|stop|restart|status}" >&2
               exit 1
               ;;
           esac
-        ''}/bin/ampctl-wrapper
+        ''}/bin/ampctl-wrapper";
       };
     };
   };
+}
