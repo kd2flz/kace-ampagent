@@ -241,8 +241,7 @@ AMP_CONF_EOF
               exit 1
               ;;
           esac
-        "}/bin/ampctl-wrapper";
+        ''}/bin/ampctl-wrapper
       };
     };
   };
-}
