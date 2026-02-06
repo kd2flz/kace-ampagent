@@ -18,8 +18,11 @@ let
 
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
-  # Helper: create a systemd-safe service for a KACE binary
+  # Helper: create a systemd-safe service for a KACE binary that lacks -start/-stop
   mkKaceService = name: desc: extraOpts:
+    let
+      bin = "${cfg.package}/opt/quest/kace/bin/${name}";
+    in
     {
       description = desc;
 
@@ -27,24 +30,30 @@ let
       wantedBy = [ "multi-user.target" ];
       after = [ "kace-ampagent-setup.service" "network-online.target" ];
       wants = [ "network-online.target" ];
-      requires = [ "kace-ampagent-setup.service" ]; # ensure config exists
+      requires = [ "kace-ampagent-setup.service" ]; # ensure config exists first
 
       serviceConfig = {
+        # If the binary daemonizes (forks), change to Type="forking" and add PIDFile if available.
         Type = "simple";
+
+        ExecStart = bin;
+
+        # Let systemd handle graceful shutdown (TERM then KILL after timeout).
+        KillSignal = "SIGTERM";
+        KillMode = "control-group";
+        TimeoutStopSec = 30;
+
         Restart = "on-failure";
         RestartSec = 5;
-        TimeoutStopSec = 30;
+
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
+
         Environment = kaceEnv;
 
-        # Use native KACE stop/start flags instead of killall
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/${name} -start";
-        ExecStop = "${cfg.package}/opt/quest/kace/bin/${name} -stop";
-
         StandardOutput = "journal";
-        StandardError = "journal";
+        StandardError  = "journal";
       };
     } // extraOpts;
 in
@@ -70,7 +79,7 @@ in
       description = "Group for KACE services.";
     };
 
-    # runtime filesystem paths -> prefer str over path
+    # Runtime filesystem paths -> prefer str over path
     dataDir = mkOption {
       type = types.str;
       default = "/var/quest/kace";
@@ -161,7 +170,7 @@ in
             install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.logDir}
 
             tmpfile="$(mktemp)"
-            # Use single-quoted heredoc delimiter to avoid runtime expansions
+            # Single-quoted delimiter prevents shell expansion; Nix has already expanded ${confBody}
             cat > "$tmpfile" <<'AMP_CONF_EOF'
 ${confBody}
 AMP_CONF_EOF
@@ -188,10 +197,10 @@ AMP_CONF_EOF
     systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceService "AMPWatchDog" "KACE Watchdog Service" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
-      # If AMPWatchDog really wants to daemonize, you could:
+      # If AMPWatchDog daemonizes, you can switch:
       # serviceConfig = {
-      #   ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPWatchDog --daemon";
-      #   # and drop ExecStop to let systemd handle TERM/KILL
+      #   Type = "forking";
+      #   # PIDFile = "${cfg.dataDir}/AMPWatchDog.pid"; # only if it writes one
       # };
     });
 
@@ -216,7 +225,7 @@ AMP_CONF_EOF
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck";
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck"; # adjust if different
         StandardOutput = "journal";
         StandardError = "journal";
       };
