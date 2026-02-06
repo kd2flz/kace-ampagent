@@ -18,50 +18,38 @@ let
 
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
-  # Helper: create a systemd service for a KACE binary that supports -start/-stop
+  # Helper: controller-mode (-start/-stop)
   mkKaceServiceWithFlags = name: desc: extraOpts:
     {
       description = desc;
-
-      # Unit-level fields
       wantedBy = [ "multi-user.target" ];
       after = [ "kace-ampagent-setup.service" "network-online.target" ];
       wants = [ "network-online.target" ];
-      requires = [ "kace-ampagent-setup.service" ]; # ensure config exists first
+      requires = [ "kace-ampagent-setup.service" ];
 
       serviceConfig = {
-        # Binary handles its own daemonization under -start (typical), so keep Type=simple
-        # since we're calling a "controller" mode that returns quickly.
         Type = "simple";
-
-        # Use native KACE flags rather than launching the long-running process directly
         ExecStart = "${cfg.package}/opt/quest/kace/bin/${name} -start";
         ExecStop  = "${cfg.package}/opt/quest/kace/bin/${name} -stop";
-
-        # Safety: systemd still handles failures and timeouts
         Restart = "on-failure";
         RestartSec = 5;
         TimeoutStopSec = 30;
-
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-
         Environment = kaceEnv;
-
         StandardOutput = "journal";
         StandardError  = "journal";
       };
     } // extraOpts;
 
-  # Helper: create a systemd service for a binary with no control flags (foreground)
+  # Helper: direct foreground execution (preferred on NixOS)
   mkKaceServiceSimple = name: desc: extraOpts:
     let
       bin = "${cfg.package}/opt/quest/kace/bin/${name}";
     in
     {
       description = desc;
-
       wantedBy = [ "multi-user.target" ];
       after = [ "kace-ampagent-setup.service" "network-online.target" ];
       wants = [ "network-online.target" ];
@@ -70,20 +58,15 @@ let
       serviceConfig = {
         Type = "simple";
         ExecStart = bin;
-
         KillSignal = "SIGTERM";
         KillMode = "control-group";
         TimeoutStopSec = 30;
-
         Restart = "on-failure";
         RestartSec = 5;
-
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-
         Environment = kaceEnv;
-
         StandardOutput = "journal";
         StandardError  = "journal";
       };
@@ -111,7 +94,6 @@ in
       description = "Group for KACE services.";
     };
 
-    # Runtime filesystem paths -> prefer str over path
     dataDir = mkOption {
       type = types.str;
       default = "/var/quest/kace";
@@ -157,7 +139,7 @@ in
   };
 
   config = mkIf cfg.enable {
-    # === Setup users/groups and directories ===
+    # === Users/groups and directories ===
     users.groups = mkIf (cfg.group != "root") {
       "${cfg.group}" = { };
     };
@@ -177,13 +159,11 @@ in
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
-    # === Configuration setup (amp.conf) ===
+    # === amp.conf ===
     systemd.services.kace-ampagent-setup = {
       description = "Setup KACE AMP configuration";
       wantedBy = [ "multi-user.target" ];
       before = [ "konea.service" "kschedulerconsole.service" ];
-
-      # Run as root so we can chown/chmod deterministically
       serviceConfig = {
         Type = "oneshot";
         User = "root";
@@ -196,13 +176,9 @@ in
               concatStringsSep "\n" (mapAttrsToList (n: v: "${n}=${v}") cfg.ampConf) + "\n");
           setupScript = pkgs.writeShellScript "kace-setup" ''
             set -euo pipefail
-
-            # Create directories with owner/group/mode
             install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.dataDir}
             install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.logDir}
-
             tmpfile="$(mktemp)"
-            # Single-quoted delimiter prevents shell expansion; Nix has already expanded ${confBody}
             cat > "$tmpfile" <<'AMP_CONF_EOF'
 ${confBody}
 AMP_CONF_EOF
@@ -215,24 +191,23 @@ AMP_CONF_EOF
       };
     };
 
-    # === Service: konea (main agent) — uses native -start/-stop ===
-    systemd.services.konea = mkKaceServiceWithFlags "konea" "KACE konea agent" { };
+    # === konea: direct execution (no -start/-stop) ===
+    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" { };
 
-    # === Service: KSchedulerConsole — also supports native flags in practice ===
+    # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
     systemd.services.kschedulerconsole = mkKaceServiceWithFlags "KSchedulerConsole" "KACE Scheduler Console" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
       wantedBy = [ "multi-user.target" ];
     };
 
-    # === Optional: AMPWatchDog as native systemd service (no cron) ===
-    # If your AMPWatchDog supports -start/-stop, you can swap to mkKaceServiceWithFlags.
+    # === Optional AMPWatchDog ===
     systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceServiceSimple "AMPWatchDog" "KACE Watchdog Service" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
     });
 
-    # === Optional: Timer for health checks / cron replacement ===
+    # === Optional timer ===
     systemd.timers.konea-checker = mkIf cfg.enableWatchdog {
       description = "Periodic KACE health check";
       wantedBy = [ "timers.target" ];
@@ -253,13 +228,13 @@ AMP_CONF_EOF
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck"; # adjust if different
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck";
         StandardOutput = "journal";
         StandardError = "journal";
       };
     };
 
-    # === Optional: Legacy AMPctl compatibility (systemd-backed) ===
+    # === Legacy ampctl wrapper ===
     systemd.services.ampctl = {
       description = "Legacy KACE AMPctl compatibility wrapper (systemd-backed)";
       serviceConfig = {
