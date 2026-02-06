@@ -152,9 +152,9 @@ in
             mkdir -p -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.logDir}
 
             tmpfile="$(mktemp)"
-            cat > "$tmpfile" <<EOF
+            cat > "$tmpfile" <<AMP_CONF_EOF
 ${confBody}
-EOF
+AMP_CONF_EOF
             chmod 640 "$tmpfile"
             chown ${cfg.user}:${cfg.group} "$tmpfile"
             mv "$tmpfile" ${cfg.dataDir}/amp.conf
