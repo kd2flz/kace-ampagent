@@ -18,31 +18,6 @@ let
 
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
-  # Helper: controller-mode (-start/-stop)
-  mkKaceServiceWithFlags = name: desc: extraOpts:
-    {
-      description = desc;
-      wantedBy = [ "multi-user.target" ];
-      after = [ "kace-ampagent-setup.service" "network-online.target" ];
-      wants = [ "network-online.target" ];
-      requires = [ "kace-ampagent-setup.service" ];
-
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/${name} -start";
-        ExecStop  = "${cfg.package}/opt/quest/kace/bin/${name} -stop";
-        Restart = "on-failure";
-        RestartSec = 5;
-        TimeoutStopSec = 30;
-        User = cfg.user;
-        Group = cfg.group;
-        WorkingDirectory = cfg.dataDir;
-        Environment = kaceEnv;
-        StandardOutput = "journal";
-        StandardError  = "journal";
-      };
-    } // extraOpts;
-
   # Helper: direct foreground execution (preferred on NixOS)
   mkKaceServiceSimple = name: desc: extraOpts:
     let
@@ -195,7 +170,7 @@ AMP_CONF_EOF
     systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" { };
 
     # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
-    systemd.services.kschedulerconsole = mkKaceServiceWithFlags "KSchedulerConsole" "KACE Scheduler Console" {
+    systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
       wantedBy = [ "multi-user.target" ];
