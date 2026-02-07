@@ -166,33 +166,8 @@ AMP_CONF_EOF
       };
     };
 
-    # === konea: daemonizes itself (forking), systemd 245+ can guess PID ===
-    systemd.services.konea = let
-      bin = "${cfg.package}/opt/quest/kace/bin/konea";
-    in {
-      description = "KACE konea agent";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "kace-ampagent-setup.service" "network-online.target" ];
-      wants = [ "network-online.target" ];
-      requires = [ "kace-ampagent-setup.service" ];
-
-      serviceConfig = {
-        Type = "forking";
-        ExecStart = bin;
-        GuessMainPID = "yes";
-        KillSignal = "SIGTERM";
-        KillMode = "control-group";
-        TimeoutStopSec = 30;
-        Restart = "on-failure";
-        RestartSec = 5;
-        User = cfg.user;
-        Group = cfg.group;
-        WorkingDirectory = cfg.dataDir;
-        Environment = kaceEnv;
-        StandardOutput = "journal";
-        StandardError = "journal";
-      };
-    };
+    # === konea: direct execution (no -start/-stop) ===
+    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" { };
 
     # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
     systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
