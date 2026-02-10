@@ -18,10 +18,13 @@ let
 
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
+  # Path to kace binaries
+  kaceBinDir = "${cfg.package}/opt/quest/kace/bin";
+
   # Helper: direct foreground execution (preferred on NixOS)
   mkKaceServiceSimple = name: desc: extraOpts:
     let
-      bin = "${cfg.package}/opt/quest/kace/bin/${name}";
+      bin = "${kaceBinDir}/${name}";
     in
     {
       description = desc;
@@ -206,7 +209,7 @@ AMP_CONF_EOF
 
     # === konea: runs as daemon with -start ===
     systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
-      serviceConfig.ExecStart = "${bin} -start";
+      serviceConfig.ExecStart = "${kaceBinDir}/konea -start";
     };
 
     # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
