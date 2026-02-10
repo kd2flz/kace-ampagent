@@ -133,6 +133,42 @@ in
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
+    # === Initial konea configuration (set server URL via -url) ===
+    # This runs once to configure the agent with the server URL.
+    # The marker file ensures this only configures once.
+    systemd.services.kace-ampagent-initial-config = {
+      description = "Initial KACE AMP Agent configuration (set server URL)";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "konea.service" "kschedulerconsole.service" ];
+      after = [ "kace-ampagent-setup.service" ];
+      requires = [ "kace-ampagent-setup.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        User = "root";
+        Group = "root";
+        WorkingDirectory = cfg.dataDir;
+        ExecStart = let
+          markerFile = "${cfg.dataDir}/.initial-config-done";
+          bin = "${cfg.package}/opt/quest/kace/bin/konea";
+          initScript = pkgs.writeShellScript "kace-initial-config" ''
+            set -euo pipefail
+            # Only run initial configuration if not already done
+            if [ -f "${markerFile}" ]; then
+              echo "Initial configuration already completed, skipping."
+              exit 0
+            fi
+            echo "Running initial configuration with server URL: ${cfg.host}"
+            # Configure the agent with the server URL
+            "${bin}" -url "${cfg.host}" || true
+            # Create marker file to indicate config is done
+            install -d -m 0750 -o ${cfg.user} -g ${cfg.group} "${cfg.dataDir}"
+            touch "${markerFile}"
+            chown ${cfg.user}:${cfg.group} "${markerFile}"
+          '';
+        in
+          initScript;
+      };
+    };
 
     # === amp.conf ===
     systemd.services.kace-ampagent-setup = {
