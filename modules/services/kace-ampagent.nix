@@ -133,11 +133,11 @@ in
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
-    # === Initial konea configuration (set server URL via -url) ===
-    # This runs once to configure the agent with the server URL.
+    # === Initial konea configuration (enable connection) ===
+    # This runs once to enroll the agent with the server.
     # The marker file ensures this only configures once.
     systemd.services.kace-ampagent-initial-config = {
-      description = "Initial KACE AMP Agent configuration (set server URL)";
+      description = "Initial KACE AMP Agent configuration (enable connection)";
       wantedBy = [ "multi-user.target" ];
       before = [ "konea.service" "kschedulerconsole.service" ];
       after = [ "kace-ampagent-setup.service" ];
@@ -158,8 +158,10 @@ in
               exit 0
             fi
             echo "Running initial configuration with server URL: ${cfg.host}"
-            # Configure the agent with the server URL
-            "${bin}" -url "${cfg.host}" || true
+            # First set the server URL, then enable the connection
+            # The -enable flag is required to enroll the agent and download kbot scripts
+            "${bin}" -url "${cfg.host}"
+            "${bin}" -enable || true
             # Create marker file to indicate config is done
             install -d -m 0750 -o ${cfg.user} -g ${cfg.group} "${cfg.dataDir}"
             touch "${markerFile}"
@@ -202,8 +204,10 @@ AMP_CONF_EOF
       };
     };
 
-    # === konea: direct execution (no -start/-stop) ===
-    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" { };
+    # === konea: runs as daemon with -start ===
+    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
+      serviceConfig.ExecStart = "${bin} -start";
+    };
 
     # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
     systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
