@@ -210,6 +210,9 @@ AMP_CONF_EOF
     # === konea: runs as daemon with -start ===
     systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
       serviceConfig.ExecStart = "${kaceBinDir}/konea -start";
+      serviceConfig.Type = "forking";
+      serviceConfig.PIDFile = "${cfg.dataDir}/konea.pid";
+      serviceConfig.ExecStop = "${kaceBinDir}/konea -stop";
     };
 
     # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
