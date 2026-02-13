@@ -38,6 +38,7 @@ let
         ExecStart = bin;
         KillSignal = "SIGTERM";
         KillMode = "control-group";
+        TimeoutStartSec = 60;
         TimeoutStopSec = 30;
         Restart = "on-failure";
         RestartSec = 5;
@@ -47,6 +48,7 @@ let
         Environment = kaceEnv;
         StandardOutput = "journal";
         StandardError  = "journal";
+        StandardInput = "none";
       };
     } // extraOpts;
 in
@@ -143,13 +145,16 @@ in
       description = "Initial KACE AMP Agent configuration (enable connection)";
       wantedBy = [ "multi-user.target" ];
       before = [ "konea.service" "kschedulerconsole.service" ];
-      after = [ "kace-ampagent-setup.service" ];
+      after = [ "kace-ampagent-setup.service" "network-online.target" ];
+      wants = [ "network-online.target" ];
       requires = [ "kace-ampagent-setup.service" ];
       serviceConfig = {
         Type = "oneshot";
         User = "root";
         Group = "root";
         WorkingDirectory = cfg.dataDir;
+        TimeoutStartSec = 120;
+        StandardInput = "none";
         ExecStart = let
           markerFile = "${cfg.dataDir}/.initial-config-done";
           bin = "${cfg.package}/opt/quest/kace/bin/konea";
@@ -207,25 +212,50 @@ AMP_CONF_EOF
       };
     };
 
+
     # === konea: runs as daemon with -start ===
+
     systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
+
       serviceConfig.ExecStart = "${kaceBinDir}/konea -start";
+
       serviceConfig.Type = "forking";
+
       serviceConfig.PIDFile = "${cfg.dataDir}/konea.pid";
+
+      serviceConfig.GuessMainPID = true;
+
       serviceConfig.ExecStop = "${kaceBinDir}/konea -stop";
+
+    } // {
+      after = [ "kace-ampagent-setup.service" "kace-ampagent-initial-config.service" "network-online.target" ];
+
+      wants = [ "network-online.target" ];
+
+      requires = [ "kace-ampagent-setup.service" "kace-ampagent-initial-config.service" ];
+
     };
 
-    # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
+
+
+    # === KSchedulerConsole: start/stop flags ===
+
     systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
-      after = [ "konea.service" ];
-      requires = [ "konea.service" ];
+
+      after = [ "konea.service" "kace-ampagent-initial-config.service" ];
+
+      requires = [ "konea.service" "kace-ampagent-initial-config.service" ];
+
       wantedBy = [ "multi-user.target" ];
+
     };
+
+
 
     # === Optional AMPWatchDog ===
     systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceServiceSimple "AMPWatchDog" "KACE Watchdog Service" {
-      after = [ "konea.service" ];
-      requires = [ "konea.service" ];
+      after = [ "konea.service" "kace-ampagent-initial-config.service" ];
+      requires = [ "konea.service" "kace-ampagent-initial-config.service" ];
     });
 
     # === Optional timer ===
