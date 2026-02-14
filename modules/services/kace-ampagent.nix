@@ -29,9 +29,9 @@ let
     {
       description = desc;
       wantedBy = [ "multi-user.target" ];
-      after = [ "kace-ampagent-setup.service" "network-online.target" ];
+      after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      requires = [ "kace-ampagent-setup.service" ];
+      requires = [ ];
 
       serviceConfig = {
         Type = "simple";
