@@ -154,11 +154,9 @@ in
       serviceConfig.ExecStop = "${kaceBinDir}/konea -stop";
 
     } // {
-      after = [ "kace-ampagent-setup.service" "kace-ampagent-initial-config.service" "network-online.target" ];
+      after = [ "network-online.target" ];
 
       wants = [ "network-online.target" ];
-
-      requires = [ "kace-ampagent-setup.service" "kace-ampagent-initial-config.service" ];
 
     };
 
@@ -168,9 +166,9 @@ in
 
     systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
 
-      after = [ "konea.service" "kace-ampagent-initial-config.service" ];
+      after = [ "konea.service" ];
 
-      requires = [ "konea.service" "kace-ampagent-initial-config.service" ];
+      requires = [ "konea.service" ];
 
       wantedBy = [ "multi-user.target" ];
 
