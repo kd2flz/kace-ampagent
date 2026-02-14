@@ -208,6 +208,5 @@ in
         StandardError = "journal";
       };
     };
-    };
   };
 }
