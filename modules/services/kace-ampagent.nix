@@ -1,73 +1,123 @@
-
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.kace-ampagent;
-  inherit (lib) mkOption mkEnableOption mkIf types optional mapAttrsToList concatStringsSep;
-  # AMPctl uses killall (psmisc) and /bin/true (coreutils); ensure they are on PATH
-  kacePath = "${pkgs.psmisc}/bin:${pkgs.coreutils}/bin";
-  kaceEnv = [ "PATH=${kacePath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") cfg.environment;
+  inherit (lib)
+    mkOption mkEnableOption mkIf types
+    mapAttrsToList concatStringsSep optional filterAttrs;
+
+  # Ensure required tools are in PATH (coreutils at least)
+  kacePath = lib.makeBinPath [ pkgs.coreutils ];
+
+  # Environment: build systemd-friendly env list
+  envWithoutPath = filterAttrs (n: _: n != "PATH") cfg.environment;
+
+  finalPath =
+    if (cfg.environment ? PATH) && (cfg.environment.PATH != "")
+    then "${kacePath}:${cfg.environment.PATH}"
+    else kacePath;
+
+  kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
+
+  # Path to kace binaries
+  kaceBinDir = "${cfg.package}/opt/quest/kace/bin";
+
+  # Helper: direct foreground execution (preferred on NixOS)
+  mkKaceServiceSimple = name: desc: extraOpts:
+    let
+      bin = "${kaceBinDir}/${name}";
+    in
+    {
+      description = desc;
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = bin;
+        KillSignal = "SIGTERM";
+        KillMode = "control-group";
+        TimeoutStartSec = 120;
+        TimeoutStopSec = 30;
+        Restart = "on-failure";
+        RestartSec = 5;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
+        StandardOutput = "journal";
+        StandardError  = "journal";
+      };
+    } // extraOpts;
 in
 {
   options.services.kace-ampagent = {
-    enable = mkEnableOption "Quest KACE AMP Agent";
+    enable = mkEnableOption "Quest KACE AMP Agent (systemd)";
 
     package = mkOption {
       type = types.package;
       default = pkgs.kace-ampagent;
-      description = "Package providing the KACE agent tree (generic tarball version).";
+      description = "Package containing KACE agent tree (e.g., tarball install under /opt/quest/kace).";
     };
 
     user = mkOption {
       type = types.str;
       default = "root";
-      description = "User account to run the KACE agent.";
+      description = "User to run KACE services.";
     };
 
     group = mkOption {
       type = types.str;
       default = "root";
-      description = "Group to run the KACE agent.";
+      description = "Group for KACE services.";
     };
 
     dataDir = mkOption {
-      type = types.path;
+      type = types.str;
       default = "/var/quest/kace";
-      description = "Data directory used by the KACE agent (contains amp.conf).";
+      description = "Working/data directory (amp.conf lives here).";
     };
 
     logDir = mkOption {
-      type = types.path;
+      type = types.str;
       default = "/var/log/quest/kace";
-      description = "Log directory used by the KACE agent.";
+      description = "Log directory.";
     };
 
     host = mkOption {
       type = types.str;
       example = "kbox.example.com";
-      description = "KACE SMA host (amp.conf: host=<value>).";
+      description = "KACE SMA host (written to amp.conf).";
     };
 
     ampConf = mkOption {
       type = types.attrsOf types.str;
       default = { };
-      example = { org = "Default"; /* token = "enrollment-token"; */ };
-      description = "Extra amp.conf entries to write as key=value lines.";
+      example = { org = "Default"; };
+      description = "Additional key=value entries for amp.conf.";
     };
 
     environment = mkOption {
       type = types.attrsOf types.str;
       default = { };
-      description = "Environment variables for the agent (e.g., KACE_HOST, KACE_TOKEN).";
+      description = "Additional environment variables (e.g., KACE_TOKEN, KACE_HTTPS).";
     };
 
     linkOptPath = mkOption {
       type = types.bool;
       default = true;
-      description = "Create /opt/quest/kace symlink to the package content (useful for scripts expecting FHS paths).";
+      description = "Create /opt/quest/kace → package symlink.";
+    };
+
+    enableWatchdog = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Enable standalone AMPWatchDog as systemd service (replaces cron).";
     };
   };
 
   config = mkIf cfg.enable {
+    # === Users/groups and directories ===
     users.groups = mkIf (cfg.group != "root") {
       "${cfg.group}" = { };
     };
@@ -85,74 +135,87 @@ in
       [
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
-      ]
-      ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
+      ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
-    systemd.services.kace-ampagent-setup = {
-      description = "Prepare KACE AMP Agent configuration";
+    # === konea: runs as daemon with -start ===
+    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
+      serviceConfig.ExecStart = "${kaceBinDir}/konea";
+    };
+
+    # === KSchedulerConsole: start/stop flags
+    systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
+      after = [ "konea.service" ];
+      requires = [ "konea.service" ];
       wantedBy = [ "multi-user.target" ];
-      before = [ "kace-ampagent-bootup.service" ];
+    };
+
+    # === Optional AMPWatchDog ===
+    systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceServiceSimple "AMPWatchDog" "KACE Watchdog Service" {
+      after = [ "konea.service" ];
+      requires = [ "konea.service" ];
+    });
+
+    # === Optional timer ===
+    systemd.timers.konea-checker = mkIf cfg.enableWatchdog {
+      description = "Periodic KACE health check";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "1min";
+        OnUnitActiveSec = "5min";
+        AccuracySec = "1m";
+        Persistent = true;
+      };
+    };
+
+    systemd.services.konea-checker = mkIf cfg.enableWatchdog {
+      description = "KACE Konea health check (once per timer tick)";
+      after = [ "konea.service" ];
+      requires = [ "konea.service" ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = let
-          confBody =
-            "host=${cfg.host}\n" +
-            (if cfg.ampConf == { } then "" else
-              (concatStringsSep "\n" (mapAttrsToList (n: v: "${n}=${v}") cfg.ampConf)) + "\n");
-          setupScript = pkgs.writeShellScript "kace-setup" ''
-            set -euo pipefail
-            install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.dataDir}
-            install -d -m 0750 -o ${cfg.user} -g ${cfg.group} ${cfg.logDir}
-            tmpfile="$(mktemp)"
-            cat > "$tmpfile" <<'EOF'
-${confBody}EOF
-            install -m 0640 -o ${cfg.user} -g ${cfg.group} "$tmpfile" ${cfg.dataDir}/amp.conf
-            rm -f "$tmpfile"
-          '';
-        in setupScript;
-      };
-    };
-
-    # AMPAgentBootup: run boot scripts (per KACE generic Linux guidelines)
-    systemd.services.kace-ampagent-bootup = {
-      description = "KACE AMP Agent boot scripts";
-      before = [ "multi-user.target" "graphical.target" ];
-      after = [ "kace-ampagent-setup.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "forking";
-        Restart = "no";
-        TimeoutSec = "5min";
-        RemainAfterExit = true;
-        SuccessExitStatus = [ "5" "6" ];
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        Environment = kaceEnv;
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPAgentBootup start";
-        ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPAgentBootup stop";
+        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck";
+        StandardOutput = "journal";
+        StandardError = "journal";
       };
     };
 
-    # AMPAgent: start konea and AMPWatchDog via AMPctl (per KACE generic Linux guidelines)
-    systemd.services.kace-ampagent = {
-      description = "Quest KACE AMP Agent (konea and AMPWatchDog)";
-      before = [ "multi-user.target" "graphical.target" ];
-      after = [ "remote-fs.target" "dbus.service" "kace-ampagent-setup.service" "kace-ampagent-bootup.service" ];
-      wants = [ "network-online.target" ];
-      wantedBy = [ "multi-user.target" ];
+    # === Legacy ampctl wrapper ===
+    systemd.services.ampctl = {
+      description = "Legacy KACE AMPctl compatibility wrapper (systemd-backed)";
       serviceConfig = {
-        Type = "forking";
-        Restart = "no";
-        TimeoutSec = "5min";
+        Type = "oneshot";
         RemainAfterExit = true;
-        SuccessExitStatus = [ "5" "6" ];
-        User = cfg.user;
-        Group = cfg.group;
-        WorkingDirectory = cfg.dataDir;
-        Environment = kaceEnv;
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPctl start";
-        ExecStop = "${cfg.package}/opt/quest/kace/bin/AMPctl stop";
+        ExecStart = "${pkgs.writeShellScript "ampctl-wrapper" ''
+          set -euo pipefail
+          case "$1" in
+            start)
+              systemctl start konea
+              systemctl start kschedulerconsole
+              ;;
+            stop)
+              systemctl stop kschedulerconsole || true
+              systemctl stop konea || true
+              ;;
+            restart)
+              systemctl restart kschedulerconsole
+              systemctl restart konea
+              ;;
+            status)
+              if systemctl is-active --quiet konea; then
+                exit 0
+              else
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Usage: $0 {start|stop|restart|status}" >&2
+              exit 1
+              ;;
+          esac
+        ''}/bin/ampctl-wrapper";
       };
     };
   };
