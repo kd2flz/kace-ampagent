@@ -149,6 +149,7 @@ in
         Type = "oneshot";
         User = "root";
         Group = "root";
+        TimeoutSec=120;
         WorkingDirectory = cfg.dataDir;
         ExecStart = let
           markerFile = "${cfg.dataDir}/.initial-config-done";
@@ -184,6 +185,7 @@ in
         Type = "oneshot";
         User = "root";
         Group = "root";
+        TimeoutSec=120;
         WorkingDirectory = cfg.dataDir;
         ExecStart = let
           confBody =
@@ -212,7 +214,7 @@ AMP_CONF_EOF
       serviceConfig.ExecStart = "${kaceBinDir}/konea -start";
     };
 
-    # === KSchedulerConsole: start/stop flags (flip to Simple if needed) ===
+    # === KSchedulerConsole: start/stop flags
     systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
