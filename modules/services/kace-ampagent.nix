@@ -182,41 +182,5 @@ in
       };
     };
 
-    # === Legacy ampctl wrapper ===
-    systemd.services.ampctl = {
-      description = "Legacy KACE AMPctl compatibility wrapper (systemd-backed)";
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = "${pkgs.writeShellScript "ampctl-wrapper" ''
-          set -euo pipefail
-          case "$1" in
-            start)
-              systemctl start konea
-              systemctl start kschedulerconsole
-              ;;
-            stop)
-              systemctl stop kschedulerconsole || true
-              systemctl stop konea || true
-              ;;
-            restart)
-              systemctl restart kschedulerconsole
-              systemctl restart konea
-              ;;
-            status)
-              if systemctl is-active --quiet konea; then
-                exit 0
-              else
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Usage: $0 {start|stop|restart|status}" >&2
-              exit 1
-              ;;
-          esac
-        ''}/bin/ampctl-wrapper";
-      };
-    };
   };
 }
