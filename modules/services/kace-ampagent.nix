@@ -5,8 +5,15 @@ let
     mkOption mkEnableOption mkIf types
     mapAttrsToList concatStringsSep optional filterAttrs;
 
-  # Ensure required tools are in PATH (coreutils at least)
-  kacePath = lib.makeBinPath [ pkgs.coreutils ];
+  # Ensure required tools are in PATH for script execution
+  kacePath = lib.makeBinPath [
+    pkgs.coreutils    # true, false, etc.
+    pkgs.bash         # CRITICAL - needed to run any scripts
+    pkgs.psmisc       # killall
+    pkgs.gnugrep      # grep
+    pkgs.gnused       # sed
+    pkgs.findutils    # find, xargs
+  ];
 
   # Environment: build systemd-friendly env list
   envWithoutPath = filterAttrs (n: _: n != "PATH") cfg.environment;
