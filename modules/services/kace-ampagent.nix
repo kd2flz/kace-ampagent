@@ -158,7 +158,7 @@ in
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStartPre = "/bin/sleep 3";
+        ExecStartPre = "sleep 3";
         ExecStart = "${kaceBinDir}/KSchedulerConsole";
         KillSignal = "SIGTERM";
         KillMode = "control-group";
