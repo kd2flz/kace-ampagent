@@ -154,6 +154,9 @@ in
       after = [ "konea.service" ];
       requires = [ "konea.service" ];
       wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        ExecStartPre = [ "/bin/sleep 3" ];
+      };
     };
 
     # === Optional AMPWatchDog ===
