@@ -150,12 +150,28 @@ in
     };
 
     # === KSchedulerConsole: start/stop flags
-    systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
-      after = [ "konea.service" ];
+    systemd.services.kschedulerconsole = {
+      description = "KACE Scheduler Console";
+      after = [ "konea.service" "network-online.target" ];
       requires = [ "konea.service" ];
+      wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
-        ExecStartPre = [ "/bin/sleep 3" ];
+        Type = "simple";
+        ExecStartPre = "/bin/sleep 3";
+        ExecStart = "${kaceBinDir}/KSchedulerConsole";
+        KillSignal = "SIGTERM";
+        KillMode = "control-group";
+        TimeoutStartSec = 120;
+        TimeoutStopSec = 30;
+        Restart = "on-failure";
+        RestartSec = 5;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
+        StandardOutput = "journal";
+        StandardError = "journal";
       };
     };
 
