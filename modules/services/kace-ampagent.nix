@@ -146,7 +146,7 @@ in
 
     # === konea: runs as daemon with -start ===
     systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
-      serviceConfig.ExecStart = "${kaceBinDir}/konea";
+      serviceConfig.ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/konea'";
     };
 
     # === KSchedulerConsole: start/stop flags
@@ -159,7 +159,7 @@ in
       serviceConfig = {
         Type = "simple";
         ExecStartPre = "${pkgs.coreutils}/bin/sleep 10";
-        ExecStart = "${kaceBinDir}/KSchedulerConsole";
+        ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/KSchedulerConsole'";
         KillSignal = "SIGTERM";
         KillMode = "control-group";
         TimeoutStartSec = 120;
