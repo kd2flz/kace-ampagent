@@ -145,8 +145,27 @@ in
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
     # === konea: runs as daemon with -start ===
-    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
-      serviceConfig.ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/konea'";
+    systemd.services.konea = {
+      description = "KACE konea agent";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/konea'";
+        KillSignal = "SIGTERM";
+        KillMode = "control-group";
+        TimeoutStartSec = 120;
+        TimeoutStopSec = 30;
+        Restart = "on-failure";
+        RestartSec = 5;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
     };
 
     # === KSchedulerConsole: start/stop flags
