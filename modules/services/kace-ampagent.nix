@@ -5,8 +5,15 @@ let
     mkOption mkEnableOption mkIf types
     mapAttrsToList concatStringsSep optional filterAttrs;
 
-  # Ensure required tools are in PATH (coreutils at least)
-  kacePath = lib.makeBinPath [ pkgs.coreutils ];
+  # Ensure required tools are in PATH for script execution
+  kacePath = lib.makeBinPath [
+    pkgs.coreutils    # true, false, etc.
+    pkgs.bash         # CRITICAL - needed to run any scripts
+    pkgs.psmisc       # killall
+    pkgs.gnugrep      # grep
+    pkgs.gnused       # sed
+    pkgs.findutils    # find, xargs
+  ];
 
   # Environment: build systemd-friendly env list
   envWithoutPath = filterAttrs (n: _: n != "PATH") cfg.environment;
@@ -138,15 +145,53 @@ in
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
     # === konea: runs as daemon with -start ===
-    systemd.services.konea = mkKaceServiceSimple "konea" "KACE konea agent" {
-      serviceConfig.ExecStart = "${kaceBinDir}/konea";
+    systemd.services.konea = {
+      description = "KACE konea agent";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/konea'";
+        KillSignal = "SIGTERM";
+        KillMode = "control-group";
+        TimeoutStartSec = 120;
+        TimeoutStopSec = 30;
+        Restart = "on-failure";
+        RestartSec = 5;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
     };
 
     # === KSchedulerConsole: start/stop flags
-    systemd.services.kschedulerconsole = mkKaceServiceSimple "KSchedulerConsole" "KACE Scheduler Console" {
-      after = [ "konea.service" ];
+    systemd.services.kschedulerconsole = {
+      description = "KACE Scheduler Console";
+      after = [ "konea.service" "network-online.target" ];
       requires = [ "konea.service" ];
+      wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "simple";
+        ExecStartPre = "${pkgs.coreutils}/bin/sleep 10";
+        ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/KSchedulerConsole'";
+        KillSignal = "SIGTERM";
+        KillMode = "control-group";
+        TimeoutStartSec = 120;
+        TimeoutStopSec = 30;
+        Restart = "on-failure";
+        RestartSec = 5;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
     };
 
     # === Optional AMPWatchDog ===
@@ -182,41 +227,5 @@ in
       };
     };
 
-    # === Legacy ampctl wrapper ===
-    systemd.services.ampctl = {
-      description = "Legacy KACE AMPctl compatibility wrapper (systemd-backed)";
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = "${pkgs.writeShellScript "ampctl-wrapper" ''
-          set -euo pipefail
-          case "$1" in
-            start)
-              systemctl start konea
-              systemctl start kschedulerconsole
-              ;;
-            stop)
-              systemctl stop kschedulerconsole || true
-              systemctl stop konea || true
-              ;;
-            restart)
-              systemctl restart kschedulerconsole
-              systemctl restart konea
-              ;;
-            status)
-              if systemctl is-active --quiet konea; then
-                exit 0
-              else
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Usage: $0 {start|stop|restart|status}" >&2
-              exit 1
-              ;;
-          esac
-        ''}/bin/ampctl-wrapper";
-      };
-    };
   };
 }
