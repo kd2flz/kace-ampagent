@@ -98,6 +98,12 @@ in
       description = "KACE SMA host (written to amp.conf).";
     };
 
+    name = mkOption {
+      type = types.str;
+      default = config.networking.hostName;
+      description = "Machine name reported to KBOX (defaults to networking.hostName).";
+    };
+
     ampConf = mkOption {
       type = types.attrsOf types.str;
       default = { };
@@ -161,7 +167,7 @@ in
         else
           printf '%s\n' '${k}=${v}' >> "$CONF"
         fi
-      '') ({ host = cfg.host; } // cfg.ampConf))}
+      '') ({ host = cfg.host; name = cfg.name; } // cfg.ampConf))}
     '';
 
     # === konea: runs as daemon with -start ===
