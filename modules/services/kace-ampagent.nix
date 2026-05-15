@@ -13,6 +13,7 @@ let
     pkgs.gnugrep      # grep
     pkgs.gnused       # sed
     pkgs.findutils    # find, xargs
+    pkgs.inetutils    # hostname - needed by inventory scripts
   ];
 
   # Environment: build systemd-friendly env list
@@ -142,7 +143,26 @@ in
       [
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
+        # hostname is not at a standard FHS path on NixOS; inventory scripts
+        # that reset PATH to /bin:/usr/bin:/usr/local/bin need it here.
+        "L+ /usr/local/bin/hostname - - - - /run/current-system/sw/bin/hostname"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
+
+    # === Write NixOS-managed keys into amp.conf ===
+    # Merges host= and any ampConf entries into the live amp.conf on every
+    # nixos-rebuild switch, preserving all other keys pushed down by KBOX.
+    system.activationScripts.kace-ampconf = ''
+      mkdir -p "${cfg.dataDir}"
+      CONF="${cfg.dataDir}/amp.conf"
+      touch "$CONF"
+      ${concatStringsSep "\n" (mapAttrsToList (k: v: ''
+        if ${pkgs.gnugrep}/bin/grep -q "^${k}=" "$CONF"; then
+          ${pkgs.gnused}/bin/sed -i 's|^${k}=.*|${k}=${v}|' "$CONF"
+        else
+          printf '%s\n' '${k}=${v}' >> "$CONF"
+        fi
+      '') ({ host = cfg.host; } // cfg.ampConf))}
+    '';
 
     # === konea: runs as daemon with -start ===
     systemd.services.konea = {
