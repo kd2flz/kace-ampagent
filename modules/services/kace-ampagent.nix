@@ -32,6 +32,21 @@ let
   # Path to kace binaries
   kaceBinDir = "${cfg.package}/opt/quest/kace/bin";
 
+  # Script that re-applies NixOS-managed keys to amp.conf.
+  # Runs after a delay so it fires after KBOX pushes its config on connect,
+  # which would otherwise clobber keys we set at activation time.
+  ampConfPatchScript = pkgs.writeShellScript "kace-ampconf-patch" ''
+    sleep 30
+    CONF="${cfg.dataDir}/amp.conf"
+    ${concatStringsSep "\n" (mapAttrsToList (k: v: ''
+      if ${pkgs.gnugrep}/bin/grep -q "^${k}=" "$CONF"; then
+        ${pkgs.gnused}/bin/sed -i 's|^${k}=.*|${k}=${v}|' "$CONF"
+      else
+        printf '%s\n' '${k}=${v}' >> "$CONF"
+      fi
+    '') ({ name = cfg.name; } // cfg.ampConf))}
+  '';
+
   # Helper: direct foreground execution (preferred on NixOS)
   mkKaceServiceSimple = name: desc: extraOpts:
     let
@@ -155,16 +170,18 @@ in
       [
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
-        # hostname is not at a standard FHS path on NixOS; inventory scripts
-        # that reset PATH to /bin:/usr/bin:/usr/local/bin need it here.
-        "L+ /usr/local/bin/hostname - - - - /run/current-system/sw/bin/hostname"
-        # dmidecode is hardcoded to /usr/sbin/dmidecode in KInventory (not on PATH).
-        "L+ /usr/sbin/dmidecode - - - - /run/current-system/sw/bin/dmidecode"
+        # hostname and dmidecode are not at standard FHS paths on NixOS.
+        # Point symlinks directly to the nix store path (NOT /run/current-system/sw/bin)
+        # so they are never dangling regardless of environment.systemPackages.
+        "L+ /usr/local/bin/hostname - - - - ${pkgs.inetutils}/bin/hostname"
+        "L+ /usr/sbin/dmidecode - - - - ${pkgs.dmidecode}/bin/dmidecode"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
-    # === Write NixOS-managed keys into amp.conf ===
-    # Merges host= and any ampConf entries into the live amp.conf on every
-    # nixos-rebuild switch, preserving all other keys pushed down by KBOX.
+    # === Write NixOS-managed keys into amp.conf at activation time ===
+    # Handles initial setup and ensures host= is always correct.
+    # Note: KBOX pushes a fresh amp.conf on every konea connection, which
+    # clobbers keys like name=. The ExecStartPost on konea re-applies them
+    # 30 s after start (after the KBOX push settles).
     system.activationScripts.kace-ampconf = ''
       mkdir -p "${cfg.dataDir}"
       CONF="${cfg.dataDir}/amp.conf"
@@ -187,6 +204,10 @@ in
       serviceConfig = {
         Type = "simple";
         ExecStart = "${pkgs.bash}/bin/bash -c 'PATH=${finalPath} exec ${kaceBinDir}/konea'";
+        # Re-apply name= (and any ampConf keys) after KBOX pushes its config.
+        # KBOX overwrites amp.conf shortly after konea connects; 30 s is enough
+        # for that push to complete before we write our keys back.
+        ExecStartPost = ampConfPatchScript;
         KillSignal = "SIGTERM";
         KillMode = "control-group";
         TimeoutStartSec = 120;
