@@ -14,6 +14,9 @@ let
     pkgs.gnused       # sed
     pkgs.findutils    # find, xargs
     pkgs.inetutils    # hostname - needed by inventory scripts
+    pkgs.systemd      # systemctl - needed for startup programs inventory
+    pkgs.pciutils     # lspci - needed for audio/video hardware inventory
+    pkgs.networkmanager # nmcli - needed for DHCP/network inventory
   ];
 
   # Environment: build systemd-friendly env list
@@ -145,6 +148,9 @@ in
       };
     };
 
+    # dmidecode is hardcoded to /usr/sbin/dmidecode by KInventory; ensure it is installed.
+    environment.systemPackages = [ pkgs.dmidecode ];
+
     systemd.tmpfiles.rules =
       [
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
@@ -152,6 +158,8 @@ in
         # hostname is not at a standard FHS path on NixOS; inventory scripts
         # that reset PATH to /bin:/usr/bin:/usr/local/bin need it here.
         "L+ /usr/local/bin/hostname - - - - /run/current-system/sw/bin/hostname"
+        # dmidecode is hardcoded to /usr/sbin/dmidecode in KInventory (not on PATH).
+        "L+ /usr/sbin/dmidecode - - - - /run/current-system/sw/bin/dmidecode"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
     # === Write NixOS-managed keys into amp.conf ===
