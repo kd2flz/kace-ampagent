@@ -170,10 +170,14 @@ in
       [
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
         "d ${cfg.logDir} 0750 ${cfg.user} ${cfg.group} - -"
-        # hostname and dmidecode are not at standard FHS paths on NixOS.
-        # Point symlinks directly to the nix store path (NOT /run/current-system/sw/bin)
+        # hostname is not at a standard FHS path on NixOS. konea (precompiled Ubuntu
+        # binary) calls hostname via a hardcoded PATH=/usr/bin:/bin, so we need
+        # symlinks in all three locations. Point directly to the nix store path
         # so they are never dangling regardless of environment.systemPackages.
         "L+ /usr/local/bin/hostname - - - - ${pkgs.inetutils}/bin/hostname"
+        "L+ /usr/bin/hostname - - - - ${pkgs.inetutils}/bin/hostname"
+        "L+ /bin/hostname - - - - ${pkgs.inetutils}/bin/hostname"
+        # dmidecode is hardcoded to /usr/sbin/dmidecode in KInventory (not on PATH).
         "L+ /usr/sbin/dmidecode - - - - ${pkgs.dmidecode}/bin/dmidecode"
       ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
 
