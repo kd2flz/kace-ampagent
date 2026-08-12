@@ -235,7 +235,13 @@ in
         KillMode = "control-group";
         TimeoutStartSec = 120;
         TimeoutStopSec = 30;
-        Restart = "on-failure";
+        # "always", not "on-failure": the SMA's agent-reset tells konea to shut
+        # down, and konea exits 0. on-failure ignores a clean exit, so the agent
+        # stays dead until the next reboot with nothing appearing to be wrong.
+        # Observed 2026-08-07: a reset at 08:50:35 took konea and
+        # KSchedulerConsole down and neither returned for hours -- no scheduled
+        # or forced inventory can run in that state.
+        Restart = "always";
         RestartSec = 5;
         User = cfg.user;
         Group = cfg.group;
@@ -261,7 +267,10 @@ in
         KillMode = "control-group";
         TimeoutStartSec = 120;
         TimeoutStopSec = 30;
-        Restart = "on-failure";
+        # Same clean-exit-on-reset problem as konea above. Without this the
+        # scheduler stays dead after a reset, so even the periodic inventory
+        # stops -- the failure is silent because nothing ever reports failed.
+        Restart = "always";
         RestartSec = 5;
         User = cfg.user;
         Group = cfg.group;
