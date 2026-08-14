@@ -78,7 +78,7 @@ nix build .#kace-ampagent
     -   `kace-ampagent-setup`: Creates the `amp.conf` configuration file with the host and optional settings
     -   `konea`: Main KACE agent service that runs `konea -start` as a daemon
     -   `kschedulerconsole`: Scheduler console service that starts after konea
-    -   `ampwatchdog` (optional): Standalone watchdog service when `enableWatchdog = true`
+    -   `ampwatchdog.timer` + `ampwatchdog.service` (optional): AMPWatchDog watchdog one-shot every 6 h when `enableWatchdog = true` (matches the shipped `AMPWatchDogCrontab`)
 -   `services.kace-ampagent.package`: The Nix package providing the KACE agent binaries (package, default: `pkgs.kace-ampagent` from the overlay). Leave unset so the module builds the package with your system's nixpkgs; override only if you need a different source.
 -   `services.kace-ampagent.dataDir`: The directory where the agent stores its data (string, default `/var/quest/kace`).
 -   `services.kace-ampagent.logDir`: The directory where the agent stores its logs (string, default `/var/log/quest/kace`).
@@ -86,7 +86,7 @@ nix build .#kace-ampagent
 -   `services.kace-ampagent.linkOptPath`: Create a `/opt/quest/kace` symlink pointing to the package content for compatibility (boolean, default `true`).
 -   `services.kace-ampagent.host`: The KACE SMA host (string, required). Written to `amp.conf` as `host=`.
 -   `services.kace-ampagent.ampConf`: An attribute set of additional key-value pairs for `amp.conf` (attrset, default `{}`).
--   `services.kace-ampagent.enableWatchdog`: Enable the standalone `AMPWatchDog` service (boolean, default `false`).
+-   `services.kace-ampagent.enableWatchdog`: Enable `AMPWatchDog` via systemd timers (boolean, default `false`). Creates `ampwatchdog.timer` (every 6 h, matching `AMPWatchDogCrontab`) and `konea-checker.timer` (every 10 min, matching `KoneaCheckerCrontab`). The watchdog one-shots intentionally do NOT depend on `konea.service`, so they still run and restart konea after an SMA agent-reset.
 
 ### Example
 
@@ -118,9 +118,9 @@ When the module is enabled, the following systemd services are created and run i
 
 4. **`kschedulerconsole.service`** (simple): Runs `KSchedulerConsole` (depends on konea)
 
-5. **`ampwatchdog.service`** (simple, optional): Runs `AMPWatchDog` when `enableWatchdog = true`
+5. **`ampwatchdog.timer`** and **`ampwatchdog.service`** (oneshot, optional): Runs `AMPWatchDog` every 6 h when `enableWatchdog = true` — independently of `konea.service`
 
-6. **`konea-checker.timer`** and **`konea-checker.service`** (optional): Periodic health checks when `enableWatchdog = true`
+6. **`konea-checker.timer`** and **`konea-checker.service`** (oneshot, optional): Runs `AMPWatchDog -k` every 10 min when `enableWatchdog = true` — independently of `konea.service`
 
 ## Using the Agent Manually
 

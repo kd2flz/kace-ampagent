@@ -57,35 +57,6 @@ let
       fi
     '') ({ name = cfg.name; } // cfg.ampConf))}
   '';
-
-  # Helper: direct foreground execution (preferred on NixOS)
-  mkKaceServiceSimple = name: desc: extraOpts:
-    let
-      bin = "${kaceBinDir}/${name}";
-    in
-    {
-      description = desc;
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = bin;
-        KillSignal = "SIGTERM";
-        KillMode = "control-group";
-        TimeoutStartSec = 120;
-        TimeoutStopSec = 30;
-        Restart = "on-failure";
-        RestartSec = 5;
-        User = cfg.user;
-        Group = cfg.group;
-        WorkingDirectory = cfg.dataDir;
-        Environment = kaceEnv;
-        StandardOutput = "journal";
-        StandardError  = "journal";
-      };
-    } // extraOpts;
 in
 {
   options.services.kace-ampagent = {
@@ -155,7 +126,7 @@ in
     enableWatchdog = mkOption {
       type = types.bool;
       default = false;
-      description = "Enable standalone AMPWatchDog as systemd service (replaces cron).";
+      description = "Enable AMPWatchDog via systemd timers (replaces the cron one-shots KACE ships: every 6h watchdog + every 10 min konea checker).";
     };
   };
 
@@ -294,33 +265,54 @@ in
     };
 
     # === Optional AMPWatchDog ===
-    systemd.services.ampwatchdog = mkIf cfg.enableWatchdog (mkKaceServiceSimple "AMPWatchDog" "KACE Watchdog Service" {
-      after = [ "konea.service" ];
-      requires = [ "konea.service" ];
-    });
-
-    # === Optional timer ===
-    systemd.timers.konea-checker = mkIf cfg.enableWatchdog {
-      description = "Periodic KACE health check";
+    # KACE ships AMPWatchDog as periodic cron one-shots (see AMPWatchDogCrontab
+    # and KoneaCheckerCrontab in the package), so we model it as systemd timers,
+    # NOT a long-running service. A watchdog must not depend on konea.service --
+    # if it did, it would be stopped whenever konea is stopped (e.g. by an SMA
+    # agent-reset), which is exactly the failure it exists to recover from.
+    systemd.timers.ampwatchdog = mkIf cfg.enableWatchdog {
+      description = "AMPWatchDog periodic health check";
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "1min";
-        OnUnitActiveSec = "5min";
+        OnCalendar = "*-*-* 03,09,15,21:05:00"; # matches AMPWatchDogCrontab (every 6h)
+        AccuracySec = "1m";
+        Persistent = true;
+      };
+    };
+
+    systemd.services.ampwatchdog = mkIf cfg.enableWatchdog {
+      description = "AMPWatchDog KACE watchdog (one-shot per timer tick)";
+      serviceConfig = {
+        Type = "oneshot";
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.dataDir;
+        Environment = kaceEnv;
+        ExecStart = [ "${kaceBinDir}/AMPWatchDog" ];
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
+    };
+
+    systemd.timers.konea-checker = mkIf cfg.enableWatchdog {
+      description = "Periodic KACE konea health check";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* *:00,10,20,30,40,50:00"; # matches KoneaCheckerCrontab (every 10 min)
         AccuracySec = "1m";
         Persistent = true;
       };
     };
 
     systemd.services.konea-checker = mkIf cfg.enableWatchdog {
-      description = "KACE Konea health check (once per timer tick)";
-      after = [ "konea.service" ];
-      requires = [ "konea.service" ];
+      description = "KACE konea health check (one-shot per timer tick)";
       serviceConfig = {
         Type = "oneshot";
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
-        ExecStart = "${cfg.package}/opt/quest/kace/bin/AMPHealthCheck";
+        Environment = kaceEnv;
+        ExecStart = [ "${kaceBinDir}/AMPWatchDog" "-k" ];
         StandardOutput = "journal";
         StandardError = "journal";
       };
