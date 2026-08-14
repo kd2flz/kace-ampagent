@@ -288,7 +288,7 @@ in
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
         Environment = kaceEnv;
-        ExecStart = [ "${kaceBinDir}/AMPWatchDog" ];
+        ExecStart = "${kaceBinDir}/AMPWatchDog";
         StandardOutput = "journal";
         StandardError = "journal";
       };
@@ -312,7 +312,7 @@ in
         Group = cfg.group;
         WorkingDirectory = cfg.dataDir;
         Environment = kaceEnv;
-        ExecStart = [ "${kaceBinDir}/AMPWatchDog" "-k" ];
+        ExecStart = "${kaceBinDir}/AMPWatchDog -k";
         StandardOutput = "journal";
         StandardError = "journal";
       };
