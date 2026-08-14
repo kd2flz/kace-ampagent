@@ -6,18 +6,25 @@ let
     mapAttrsToList concatStringsSep optional filterAttrs;
 
   # Ensure required tools are in PATH for script execution.
-  # NOTE: this only reaches the units below (konea, KSchedulerConsole). konea
-  # sanitises the environment for anything it spawns via /exec, so the chain
-  # konea -> KPlugins -> runkbot -> KBoxClient -> KInventory does NOT inherit it.
-  # Tools KInventory needs must be FHS symlinks in tmpfiles.rules, not listed here.
+  # This PATH is inherited by konea's /exec spawn chain (konea -> KPlugins ->
+  # runkbot -> KBoxClient -> KInventory): konea does NOT sanitise it. Verified
+  # 2026-08-14 by re-running KInventory with this exact PATH and reproducing the
+  # broken ~4.5KB inventory (0 CPUs) that the SMA silently discards; with lscpu
+  # on PATH the same run yields the ~33.8KB inventory the SMA accepts. Tools
+  # KInventory needs must therefore be listed HERE, not as /usr/bin FHS symlinks
+  # (the spawn PATH has no /usr/bin, so the symlinks never resolve).
   kacePath = lib.makeBinPath [
     pkgs.coreutils    # true, false, etc.
     pkgs.bash         # CRITICAL - needed to run any scripts
     pkgs.psmisc       # killall
     pkgs.gnugrep      # grep
     pkgs.gnused       # sed
+    pkgs.gawk         # awk - used by inventory shell pipelines
     pkgs.findutils    # find, xargs
     pkgs.inetutils    # hostname - needed by inventory scripts
+    pkgs.procps       # ps, free - processes and memory inventory
+    pkgs.util-linux   # lscpu - CPU inventory (0 CPUs => SMA discards the doc)
+    pkgs.iproute2     # ip - network interface inventory
     pkgs.systemd      # systemctl - needed for startup programs inventory
     pkgs.pciutils     # lspci - needed for audio/video hardware inventory
     pkgs.networkmanager # nmcli - needed for DHCP/network inventory
@@ -183,18 +190,23 @@ in
         "L+ /bin/hostname - - - - ${pkgs.inetutils}/bin/hostname"
         # dmidecode is hardcoded to /usr/sbin/dmidecode in KInventory (not on PATH).
         "L+ /usr/sbin/dmidecode - - - - ${pkgs.dmidecode}/bin/dmidecode"
-        # KInventory resolves these with find_cmd_in_path against konea's sanitised
-        # PATH, so kacePath above never reaches it - only FHS symlinks work.
-        # Without them KInventory emits a ~4.5KB document reporting 0 CPUs and no
-        # software, which the SMA silently discards: the upload still returns 200
-        # with an empty body, so the only symptom is Last Inventory never advancing.
-        # Verified 2026-08-06 - adding these took inventory.xml 4.5KB -> 33.8KB and
-        # unstuck a device that had not inventoried in 79 days.
+        # KInventory resolves these with find_cmd_in_path against konea's spawn
+        # PATH (= kacePath above). /usr/bin symlinks alone are NOT sufficient -
+        # the spawn PATH has no /usr/bin - but keep them for tools invoked via a
+        # hardcoded /usr/bin|/usr/sbin|/bin path (dmidecode, lsblk, bash,
+        # hostname). Without lscpu on PATH, KInventory emits a ~4.5KB document
+        # reporting 0 CPUs, which the SMA silently discards: the upload still
+        # returns 200 with an empty body, so the only symptom is Last Inventory
+        # never advancing. Note: the 2026-08-06 "symlink fix" (4.5KB -> 33.8KB)
+        # was a false positive from a manually-run KInventory (user shell PATH);
+        # konea-spawned runs stayed broken until kacePath gained the tools.
         "L+ /usr/bin/lspci - - - - ${pkgs.pciutils}/bin/lspci"
         "L+ /usr/bin/systemctl - - - - ${pkgs.systemd}/bin/systemctl"
         "L+ /usr/bin/nmcli - - - - ${pkgs.networkmanager}/bin/nmcli"
         "L+ /usr/bin/lscpu - - - - ${pkgs.util-linux}/bin/lscpu"
         "L+ /usr/bin/ip - - - - ${pkgs.iproute2}/bin/ip"
+        "L+ /usr/bin/lsblk - - - - ${pkgs.util-linux}/bin/lsblk"
+        "L+ /bin/bash - - - - ${pkgs.bash}/bin/bash"
         # Not fixable this way: rpm / dpkg-query do not exist on NixOS, so
         # INSTALLED_SOFTWARE stays empty ("Only RPM and Debian package systems
         # currently supported!"). Needs a KACE Custom Inventory Rule instead.
