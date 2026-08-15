@@ -86,7 +86,7 @@ nix build .#kace-ampagent
 -   `services.kace-ampagent.linkOptPath`: Create a `/opt/quest/kace` symlink pointing to the package content for compatibility (boolean, default `true`).
 -   `services.kace-ampagent.host`: The KACE SMA host (string, required). Written to `amp.conf` as `host=`.
 -   `services.kace-ampagent.ampConf`: An attribute set of additional key-value pairs for `amp.conf` (attrset, default `{}`).
--   `services.kace-ampagent.enableWatchdog`: Enable `AMPWatchDog` via systemd timers (boolean, default `false`). Creates `ampwatchdog.timer` (every 6 h, matching `AMPWatchDogCrontab`) and `konea-checker.timer` (every 10 min, matching `KoneaCheckerCrontab`). The watchdog one-shots intentionally do NOT depend on `konea.service`, so they still run and restart konea after an SMA agent-reset.
+-   `services.kace-ampagent.enableWatchdog`: Enable `AMPWatchDog` via systemd timers (boolean, default `false`). Creates `ampwatchdog.timer` (every 6 h, matching `AMPWatchDogCrontab`) and `konea-checker.timer` (every 10 min, matching `KoneaCheckerCrontab`). The watchdog one-shots intentionally do NOT depend on `konea.service`, so they still run and restart konea after an SMA agent-reset. The 10 min `konea-checker` additionally restarts `KSchedulerConsole` if it is not running, because `AMPWatchDog -k` only revives konea — leaving the scheduler (which drives scheduled inventory/scripts) dead after a reset.
 
 ### Example
 
@@ -120,7 +120,7 @@ When the module is enabled, the following systemd services are created and run i
 
 5. **`ampwatchdog.timer`** and **`ampwatchdog.service`** (oneshot, optional): Runs `AMPWatchDog` every 6 h when `enableWatchdog = true` — independently of `konea.service`
 
-6. **`konea-checker.timer`** and **`konea-checker.service`** (oneshot, optional): Runs `AMPWatchDog -k` every 10 min when `enableWatchdog = true` — independently of `konea.service`
+6. **`konea-checker.timer`** and **`konea-checker.service`** (oneshot, optional): Runs `AMPWatchDog -k` every 10 min when `enableWatchdog = true` — independently of `konea.service`. Also starts `KSchedulerConsole` if it is down (covers the SMA agent-reset case where both stop cleanly and `Restart=always` never fires).
 
 ## Using the Agent Manually
 
