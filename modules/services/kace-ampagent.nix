@@ -5,6 +5,9 @@ let
     mkOption mkEnableOption mkIf types
     mapAttrsToList concatStringsSep optional filterAttrs;
 
+  # Use custom package with URL if provided
+  kacePackage = if cfg.packageUrl != null then pkgs.kace-ampagent.override { url = cfg.packageUrl; } else cfg.package;
+
   # Ensure required tools are in PATH for script execution.
   # This PATH is inherited by konea's /exec spawn chain (konea -> KPlugins ->
   # runkbot -> KBoxClient -> KInventory): konea does NOT sanitise it. Verified
@@ -41,7 +44,7 @@ let
   kaceEnv = [ "PATH=${finalPath}" ] ++ mapAttrsToList (n: v: "${n}=${v}") envWithoutPath;
 
   # Path to kace binaries
-  kaceBinDir = "${cfg.package}/opt/quest/kace/bin";
+  kaceBinDir = "${kacePackage}/opt/quest/kace/bin";
 
   # Wrapper for the 10-min konea checker. AMPWatchDog -k revives konea (it
   # detects systemd and does `systemctl start konea`), but it does NOT restart
@@ -82,6 +85,13 @@ in
       type = types.package;
       default = pkgs.kace-ampagent;
       description = "Package containing KACE agent tree (e.g., tarball install under /opt/quest/kace).";
+    };
+
+    packageUrl = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "https://github.com/kd2flz/resources/releases/download/15.1.45/ampagent-15.1.45.ubuntu.64.tar.gz";
+      description = "Optional URL to fetch the agent tarball for pure builds. If set, overrides the package source via pkgs.kace-ampagent.override { url = ... }.";
     };
 
     user = mkOption {
@@ -197,7 +207,7 @@ in
         # Not fixable this way: rpm / dpkg-query do not exist on NixOS, so
         # INSTALLED_SOFTWARE stays empty ("Only RPM and Debian package systems
         # currently supported!"). Needs a KACE Custom Inventory Rule instead.
-      ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${cfg.package}/opt/quest/kace";
+      ] ++ optional cfg.linkOptPath "L+ /opt/quest/kace - - - - ${kacePackage}/opt/quest/kace";
 
     # === Write NixOS-managed keys into amp.conf at activation time ===
     # Handles initial setup and ensures host= is always correct.

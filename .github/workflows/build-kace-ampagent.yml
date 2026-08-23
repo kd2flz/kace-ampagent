@@ -8,6 +8,15 @@ on:
         branches:
             - main
 
+env:
+    # Repository secret holding a publicly reachable agent tarball URL, e.g.
+    # https://github.com/<owner>/resources/releases/download/15.1.45/ampagent-15.1.45.ubuntu.64.tar.gz
+    # When set, builds fetch the tarball via fetchurl (no manual `nix store add-file`).
+    # When unset, builds fall back to requireFile and fail unless the tarball is
+    # already in the Nix store.
+    # Note: GitHub does not expose secrets to pull requests from forks.
+    KACE_TARBALL_URL: ${{ secrets.KACE_TARBALL_URL }}
+
 jobs:
     build:
         runs-on: ubuntu-latest
@@ -22,11 +31,19 @@ jobs:
                   extra_config: |
                       experimental-features = nix-command flakes
 
+            - name: Check tarball source availability
+              run: |
+                  if [ -z "$KACE_TARBALL_URL" ]; then
+                      echo "::warning::KACE_TARBALL_URL is not set. Builds will use requireFile and FAIL unless the tarball is present in the Nix store."
+                  fi
+
             - name: Build kace-ampagent package
               run: |
                   pwd
                   ls -la
-                  nix build .#kace-ampagent --print-build-logs
+                  # No --print-build-logs: fetchurl echoes the tarball URL into the
+                  # build log, which is weaker-masked on redirect/re-encode.
+                  nix build --impure .#kace-ampagent-env
 
             - name: Validate NixOS module
               run: |
@@ -51,6 +68,10 @@ jobs:
                             boot.loader.grub.enable = lib.mkForce false;
                             networking.hostName = "test-kace-ampagent-module";
                             services.kace-ampagent.enable = true;
+                            services.kace-ampagent.host = "kbox.invalid";
+                            services.kace-ampagent.packageUrl =
+                              let v = builtins.getEnv "KACE_TARBALL_URL";
+                              in if v == "" then null else v;
                           })
                         ];
                       };
@@ -59,4 +80,6 @@ jobs:
                   EOF
 
                   # Build from repository root pointing into the temporary flake so relative "path:.." resolves correctly
-                  nix build ./temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel --print-build-logs
+                  # No --print-build-logs here either: this step also fetchurl's the
+                  # tarball via packageUrl, and failure logs could echo the URL.
+                  nix build --impure ./temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel

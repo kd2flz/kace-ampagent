@@ -3,15 +3,18 @@
 , lib
 , autoPatchelfHook
 , requireFile
+, fetchurl
 , makeWrapper
 , psmisc
 , coreutils
+, url ? null
 , ...
 }:
 
 let
-  version = "15.0.54";
+  version = "15.1.45";
   agentFileName = "ampagent-${version}.ubuntu.64.tar.gz";
+  defaultUrl = "https://github.com/kd2flz/resources/releases/download/${version}/${agentFileName}";
 
   # Minimal LSB init-functions for NixOS (scripts expect /lib/lsb/init-functions)
   lsbInitFunctions = builtins.toFile "lsb-init-functions" ''
@@ -66,17 +69,28 @@ let
     }
   '';
 
-  agentSrc = requireFile {
-    name = agentFileName;
-    sha256 = "sha256-HrJp31TNW605PL7hjsCvjJFLG9PP94ARvomcpybOwDQ=";
-    message = ''
-      The Quest KACE AMP Agent generic Linux tarball is required but not provided.
+  agentSrc = if url != null then
+    fetchurl {
+      inherit url;
+      sha256 = "sha256-nkCcTIKybOJCytZzYXrrkjW6KK3pPa02z/oBLEW0hB0=";
+    }
+  else
+    requireFile {
+      name = agentFileName;
+      sha256 = "sha256-nkCcTIKybOJCytZzYXrrkjW6KK3pPa02z/oBLEW0hB0=";
+      message = ''
+        The Quest KACE AMP Agent generic Linux tarball is required but not provided.
 
-      1) Download: ${agentFileName} - see https://support.quest.com/kb/4272341/how-to-find-and-install-the-generic-linux-agent-for-sma
-      2) nix store add-file ${agentFileName}
-      3) Re-run:    nix build .#kace-ampagent
-    '';
-  };
+        Option 1 (manual):
+        1) Download: ${agentFileName} - see https://support.quest.com/kb/4272341/how-to-find-and-install-the-generic-linux-agent-for-sma
+        2) nix store add-file ${agentFileName}
+        3) Re-run:    nix build .#kace-ampagent
+
+        Option 2 (pure build via URL):
+        Pass the url parameter, e.g.:
+        (import ./pkgs/kace-ampagent { url = "${defaultUrl}"; })
+      '';
+    };
 in
 stdenv.mkDerivation {
   pname = "kace-ampagent";
