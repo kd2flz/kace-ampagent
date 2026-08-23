@@ -27,6 +27,18 @@
     packages = forAllSystems (pkgs: {
       default = pkgs.kace-ampagent;
       kace-ampagent = pkgs.kace-ampagent;
+
+      # CI helper: honors KACE_TARBALL_URL when built with `--impure`
+      # (e.g. `nix build --impure .#kace-ampagent-env`). Without the variable,
+      # or in pure eval, it behaves exactly like kace-ampagent (requireFile).
+      kace-ampagent-env =
+        let
+          res = builtins.tryEval (builtins.getEnv "KACE_TARBALL_URL");
+          url = if res.success && res.value != "" then res.value else null;
+        in
+        if url == null
+        then pkgs.kace-ampagent
+        else pkgs.kace-ampagent.override { inherit url; };
     });
 
     nixosModules.kace-ampagent = { ... }: {
