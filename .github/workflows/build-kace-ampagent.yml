@@ -49,13 +49,20 @@ jobs:
               run: |
                   pwd
                   ls -la
-                  mkdir -p temp-nixos-test
+                  # Create the test flake OUTSIDE the repository checkout: for a
+                  # flake path inside a git worktree, Nix copies only git-tracked
+                  # files to the store, so an untracked temp dir inside the repo
+                  # vanishes from the store copy and resolution fails with
+                  # ".../temp-nixos-test/flake.nix does not exist".
+                  mkdir -p ../temp-nixos-test
 
-                  cat > temp-nixos-test/flake.nix <<'EOF'
+                  cat > ../temp-nixos-test/flake.nix <<'EOF'
                   { description = "Temporary flake for NixOS module validation";
                     inputs = {
                       nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-                      kaceAgent.url = "path:.."; # parent of temp-nixos-test is repo root with your main flake
+                      # Placeholder: rewritten to the absolute checkout path below
+                      # (a bare "path:.." input fails to resolve as a store path).
+                      kaceAgent.url = "path:@REPO@";
                     };
                     outputs = { self, nixpkgs, kaceAgent, ... }: {
                       nixosConfigurations.test = nixpkgs.lib.nixosSystem {
@@ -66,7 +73,10 @@ jobs:
                           ({ config, lib, pkgs, ... }: {
                             boot.loader.systemd-boot.enable = lib.mkForce false;
                             boot.loader.grub.enable = lib.mkForce false;
+                            fileSystems."/" = { device = "/dev/null"; fsType = "ext4"; };
                             networking.hostName = "test-kace-ampagent-module";
+                            nixpkgs.config.allowUnfree = true; # kace-ampagent is licenses.unfree
+                            system.stateVersion = "25.11";
                             services.kace-ampagent.enable = true;
                             services.kace-ampagent.host = "kbox.invalid";
                             services.kace-ampagent.packageUrl =
@@ -78,8 +88,9 @@ jobs:
                     };
                   }
                   EOF
+                  sed -i "s|@REPO@|$GITHUB_WORKSPACE|" ../temp-nixos-test/flake.nix
 
-                  # Build from repository root pointing into the temporary flake so relative "path:.." resolves correctly
-                  # No --print-build-logs here either: this step also fetchurl's the
-                  # tarball via packageUrl, and failure logs could echo the URL.
-                  nix build --impure ./temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel
+                  # Build the sibling temp flake. No --print-build-logs: this step
+                  # also fetchurl's the tarball via packageUrl, and failure logs
+                  # could echo the URL.
+                  nix build --impure ../temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel
