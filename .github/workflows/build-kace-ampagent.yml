@@ -8,6 +8,15 @@ on:
         branches:
             - main
 
+env:
+    # Repository secret holding a publicly reachable agent tarball URL, e.g.
+    # https://github.com/<owner>/resources/releases/download/15.1.45/ampagent-15.1.45.ubuntu.64.tar.gz
+    # When set, builds fetch the tarball via fetchurl (no manual `nix store add-file`).
+    # When unset, builds fall back to requireFile and fail unless the tarball is
+    # already in the Nix store.
+    # Note: GitHub does not expose secrets to pull requests from forks.
+    KACE_TARBALL_URL: ${{ secrets.KACE_TARBALL_URL }}
+
 jobs:
     build:
         runs-on: ubuntu-latest
@@ -22,23 +31,38 @@ jobs:
                   extra_config: |
                       experimental-features = nix-command flakes
 
+            - name: Check tarball source availability
+              run: |
+                  if [ -z "$KACE_TARBALL_URL" ]; then
+                      echo "::warning::KACE_TARBALL_URL is not set. Builds will use requireFile and FAIL unless the tarball is present in the Nix store."
+                  fi
+
             - name: Build kace-ampagent package
               run: |
                   pwd
                   ls -la
-                  nix build .#kace-ampagent --print-build-logs
+                  # No --print-build-logs: fetchurl echoes the tarball URL into the
+                  # build log, which is weaker-masked on redirect/re-encode.
+                  nix build --impure .#kace-ampagent-env
 
             - name: Validate NixOS module
               run: |
                   pwd
                   ls -la
-                  mkdir -p temp-nixos-test
+                  # Create the test flake OUTSIDE the repository checkout: for a
+                  # flake path inside a git worktree, Nix copies only git-tracked
+                  # files to the store, so an untracked temp dir inside the repo
+                  # vanishes from the store copy and resolution fails with
+                  # ".../temp-nixos-test/flake.nix does not exist".
+                  mkdir -p ../temp-nixos-test
 
-                  cat > temp-nixos-test/flake.nix <<'EOF'
+                  cat > ../temp-nixos-test/flake.nix <<'EOF'
                   { description = "Temporary flake for NixOS module validation";
                     inputs = {
                       nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-                      kaceAgent.url = "path:.."; # parent of temp-nixos-test is repo root with your main flake
+                      # Placeholder: rewritten to the absolute checkout path below
+                      # (a bare "path:.." input fails to resolve as a store path).
+                      kaceAgent.url = "path:@REPO@";
                     };
                     outputs = { self, nixpkgs, kaceAgent, ... }: {
                       nixosConfigurations.test = nixpkgs.lib.nixosSystem {
@@ -49,14 +73,24 @@ jobs:
                           ({ config, lib, pkgs, ... }: {
                             boot.loader.systemd-boot.enable = lib.mkForce false;
                             boot.loader.grub.enable = lib.mkForce false;
+                            fileSystems."/" = { device = "/dev/null"; fsType = "ext4"; };
                             networking.hostName = "test-kace-ampagent-module";
+                            nixpkgs.config.allowUnfree = true; # kace-ampagent is licenses.unfree
+                            system.stateVersion = "25.11";
                             services.kace-ampagent.enable = true;
+                            services.kace-ampagent.host = "kbox.invalid";
+                            services.kace-ampagent.packageUrl =
+                              let v = builtins.getEnv "KACE_TARBALL_URL";
+                              in if v == "" then null else v;
                           })
                         ];
                       };
                     };
                   }
                   EOF
+                  sed -i "s|@REPO@|$GITHUB_WORKSPACE|" ../temp-nixos-test/flake.nix
 
-                  # Build from repository root pointing into the temporary flake so relative "path:.." resolves correctly
-                  nix build ./temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel --print-build-logs
+                  # Build the sibling temp flake. No --print-build-logs: this step
+                  # also fetchurl's the tarball via packageUrl, and failure logs
+                  # could echo the URL.
+                  nix build --impure ../temp-nixos-test#nixosConfigurations.test.config.system.build.toplevel
