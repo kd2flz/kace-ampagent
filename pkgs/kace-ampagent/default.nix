@@ -14,7 +14,6 @@
 let
   version = "15.1.45";
   agentFileName = "ampagent-${version}.ubuntu.64.tar.gz";
-  defaultUrl = "https://github.com/example-org/redacted/releases/download/${version}/${agentFileName}";
 
   # Minimal LSB init-functions for NixOS (scripts expect /lib/lsb/init-functions)
   lsbInitFunctions = builtins.toFile "lsb-init-functions" ''
@@ -87,8 +86,8 @@ let
         3) Re-run:    nix build .#kace-ampagent
 
         Option 2 (pure build via URL):
-        Pass the url parameter, e.g.:
-        (import ./pkgs/kace-ampagent { url = "${defaultUrl}"; })
+        Host the tarball yourself and pass the url parameter, e.g.:
+        (import ./pkgs/kace-ampagent { url = "https://your-server.example.com/${agentFileName}"; })
       '';
     };
 in
