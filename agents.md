@@ -65,8 +65,9 @@ The derivation accepts an optional `url ? null` parameter:
 
 SHA256 (both paths): `sha256-nkCcTIKybOJCytZzYXrrkjW6KK3pPa02z/oBLEW0hB0=`
 
-Known-good URL used for testing:
-`https://github.com/example-org/redacted/releases/download/15.1.45/ampagent-15.1.45.ubuntu.64.tar.gz`
+Note: the tarball URL is treated as semi-sensitive; it is supplied per-deployment
+via `packageUrl` or the KACE_TARBALL_URL CI secret and is deliberately not
+recorded in this repository (including git history - see scrub commit).
 
 Official agent download procedure (Quest KB):
 https://support.quest.com/kb/4272341/how-to-find-and-install-the-generic-linux-agent-for-sma
@@ -255,8 +256,7 @@ Pure build via URL:
 services.kace-ampagent = {
   enable = true;
   host = "kbox.example.com";
-  packageUrl =
-    "https://github.com/example-org/redacted/releases/download/15.1.45/ampagent-15.1.45.ubuntu.64.tar.gz";
+  packageUrl = "https://your-server.example.com/ampagent-15.1.45.ubuntu.64.tar.gz";
 };
 ```
 

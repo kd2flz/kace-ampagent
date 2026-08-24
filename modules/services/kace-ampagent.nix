@@ -90,7 +90,7 @@ in
     packageUrl = mkOption {
       type = types.nullOr types.str;
       default = null;
-      example = "https://github.com/example-org/redacted/releases/download/15.1.45/ampagent-15.1.45.ubuntu.64.tar.gz";
+      example = "https://your-server.example.com/ampagent-15.1.45.ubuntu.64.tar.gz";
       description = "Optional URL to fetch the agent tarball for pure builds. If set, overrides the package source via pkgs.kace-ampagent.override { url = ... }.";
     };
 
