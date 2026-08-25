@@ -127,7 +127,8 @@ The `kace-ampagent-env` output falls back to `requireFile` behavior when the var
 -   `services.kace-ampagent.logDir`: The directory where the agent stores its logs (string, default `/var/log/quest/kace`).
 -   `services.kace-ampagent.environment`: An attribute set of extra environment variables for the agent (attrset, default `{}`).
 -   `services.kace-ampagent.linkOptPath`: Create a `/opt/quest/kace` symlink pointing to the package content for compatibility (boolean, default `true`).
--   `services.kace-ampagent.host`: The KACE SMA host (string, required). Written to `amp.conf` as `host=`.
+-   `services.kace-ampagent.host`: The KACE SMA host, given directly as a plain string (nullable string, default `null`). Written to `amp.conf` as `host=`. Interpolated into the activation script at eval time - fine for a non-secret hostname, but it means the value is stored in plain text in the resulting activation-script derivation in `/nix/store`. Mutually exclusive with `hostFile`; exactly one of the two must be set.
+-   `services.kace-ampagent.hostFile`: Path to a file containing the KACE SMA host (nullable path, default `null`), read with `cat` at activation *runtime* instead of being interpolated into the activation script at eval time. Use this - e.g. pointed at a sops-nix secret path (`config.sops.secrets."kace/host".path`) - when the hostname must not appear in the Nix store or any `.drv`. Mutually exclusive with `host`; exactly one of the two must be set.
 -   `services.kace-ampagent.name`: Machine name reported to KBOX (string, default: `networking.hostName`). Written to `amp.conf` as `name=` and re-applied after each konea start (see Service Behavior).
 -   `services.kace-ampagent.ampConf`: An attribute set of additional key-value pairs for `amp.conf` (attrset, default `{}`).
 -   `services.kace-ampagent.enableWatchdog`: Enable `AMPWatchDog` via systemd timers (boolean, default `false`). Creates `ampwatchdog.timer` (every 6 h, matching `AMPWatchDogCrontab`) and `konea-checker.timer` (every 10 min, matching `KoneaCheckerCrontab`). The watchdog one-shots intentionally do NOT depend on `konea.service`, so they still run and restart konea after an SMA agent-reset. The 10 min `konea-checker` additionally restarts `KSchedulerConsole` if it is not running, because `AMPWatchDog -k` only revives konea - leaving the scheduler (which drives scheduled inventory/scripts) dead after a reset.
@@ -144,6 +145,28 @@ services.kace-ampagent = {
     # Other settings like CERT_VALIDATION, etc.
   };
   enableWatchdog = true; # Optional: watchdog + konea-checker timers
+};
+```
+
+### Keeping the host confidential (`hostFile`)
+
+If your SMA hostname shouldn't be readable in the Nix store (e.g. it leaks
+internal infrastructure naming), use `hostFile` instead of `host`. It's read
+with `cat` at activation runtime rather than interpolated into the Nix
+string / activation-script derivation, so the value never lands in a `.drv`
+or gets copied by `nix copy`/binary caches. This pairs naturally with
+sops-nix, which decrypts secrets to disk at activation time (not eval time),
+keeping the whole chain pure and secret-free in the store:
+
+```nix
+services.kace-ampagent = {
+  enable = true;
+  hostFile = config.sops.secrets."kace/host".path; # NOT `host`
+};
+
+sops.secrets."kace/host" = {
+  sopsFile = ../secrets/kace.yaml;
+  key = "host";
 };
 ```
 

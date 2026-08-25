@@ -118,7 +118,8 @@ Namespace: `services.kace-ampagent.*`. Everything below only applies when
 | group | str | "root" | Service group |
 | dataDir | str | "/var/quest/kace" | amp.conf lives here |
 | logDir | str | "/var/log/quest/kace" | Log directory |
-| host | str | (no default) | Written to amp.conf as host= |
+| host | nullOr str | null | Written to amp.conf as host=; interpolated at eval time (plaintext in the activation-script .drv). Mutually exclusive w/ hostFile; assertion requires exactly one of host/hostFile |
+| hostFile | nullOr path | null | NEW 2026-08-25: path read via `cat` at activation *runtime* instead of eval time, for host= without the value entering the Nix store (e.g. a sops-nix secret path). Mutually exclusive w/ host |
 | name | str | config.networking.hostName | Machine name reported to KBOX (name= key) |
 | ampConf | attrsOf str | {} | Extra key=value lines for amp.conf |
 | environment | attrsOf str | {} | Extra env vars; PATH gets special handling below |
@@ -155,9 +156,13 @@ environment attrs become Environment= entries on every service.
 ### amp.conf management (two mechanisms)
 
 1. Activation script `system.activationScripts.kace-ampconf` (runs at system
-   activation): ensures dataDir exists and amp.conf exists, then upserts keys:
-   `host = cfg.host`, `name = cfg.name`, plus every cfg.ampConf pair.
-   Upsert = sed replace-in-place if key exists, else append line.
+   activation): ensures dataDir exists and amp.conf exists, then upserts keys.
+   `host=` is handled by its own branch (NOT the generic map, since 2026-08-25):
+   if `cfg.hostFile != null`, the script does `HOST_VALUE="$(cat "${cfg.hostFile}")"`
+   at shell *runtime* and upserts with that; otherwise `cfg.host` is interpolated
+   directly into the sed/printf commands at Nix *eval* time (same as before).
+   The name=/ampConf map is separate and unconditional: `name = cfg.name` plus
+   every cfg.ampConf pair, upsert = sed replace-in-place if key exists else append.
 2. ExecStartPost on konea.service runs `ampConfPatchScript`: sleeps 30s, then
    re-applies `name = cfg.name` plus all cfg.ampConf keys with the same upsert
    logic. Reason: KBOX pushes a fresh amp.conf down shortly after konea

@@ -119,9 +119,28 @@ in
     };
 
     host = mkOption {
-      type = types.str;
+      type = types.nullOr types.str;
+      default = null;
       example = "kbox.example.com";
-      description = "KACE SMA host (written to amp.conf).";
+      description = ''
+        KACE SMA host (written to amp.conf), given directly as a plain string.
+        Mutually exclusive with `hostFile`. Exactly one of `host` or `hostFile`
+        must be set.
+      '';
+    };
+
+    hostFile = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      example = "/run/secrets/kace-host";
+      description = ''
+        Path to a file containing the KACE SMA host, read at activation
+        *runtime* (e.g. via `cat`) rather than interpolated into the Nix
+        string / activation script at eval time. Use this instead of `host`
+        when the hostname must not appear in the Nix store or in any `.drv`
+        (e.g. a sops-nix secret path). Mutually exclusive with `host`.
+        Exactly one of `host` or `hostFile` must be set.
+      '';
     };
 
     name = mkOption {
@@ -157,6 +176,13 @@ in
   };
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = (cfg.host != null) != (cfg.hostFile != null);
+        message = "services.kace-ampagent: exactly one of `host` or `hostFile` must be set.";
+      }
+    ];
+
     # === Users/groups and directories ===
     users.groups = mkIf (cfg.group != "root") {
       "${cfg.group}" = { };
@@ -214,17 +240,43 @@ in
     # Note: KBOX pushes a fresh amp.conf on every konea connection, which
     # clobbers keys like name=. The ExecStartPost on konea re-applies them
     # 30 s after start (after the KBOX push settles).
+    #
+    # host= is upserted separately from the name=/ampConf map below so that
+    # `hostFile` (e.g. a sops-nix secret path) can be `cat`-ed at shell
+    # *runtime* instead of being interpolated into this script as a Nix
+    # string at *eval* time. Interpolating a value here bakes it in plain
+    # text into the activation script derivation in /nix/store (world
+    # readable, cached, copied on `nix copy`) -- fine for non-secret values
+    # like `host`, but defeats the point of a secret if `hostFile` is used.
     system.activationScripts.kace-ampconf = ''
       mkdir -p "${cfg.dataDir}"
       CONF="${cfg.dataDir}/amp.conf"
       touch "$CONF"
+
+      ${
+        if cfg.hostFile != null then ''
+          HOST_VALUE="$(cat "${cfg.hostFile}")"
+          if ${pkgs.gnugrep}/bin/grep -q "^host=" "$CONF"; then
+            ${pkgs.gnused}/bin/sed -i "s|^host=.*|host=$HOST_VALUE|" "$CONF"
+          else
+            printf 'host=%s\n' "$HOST_VALUE" >> "$CONF"
+          fi
+        '' else ''
+          if ${pkgs.gnugrep}/bin/grep -q "^host=" "$CONF"; then
+            ${pkgs.gnused}/bin/sed -i 's|^host=.*|host=${cfg.host}|' "$CONF"
+          else
+            printf 'host=%s\n' '${cfg.host}' >> "$CONF"
+          fi
+        ''
+      }
+
       ${concatStringsSep "\n" (mapAttrsToList (k: v: ''
         if ${pkgs.gnugrep}/bin/grep -q "^${k}=" "$CONF"; then
           ${pkgs.gnused}/bin/sed -i 's|^${k}=.*|${k}=${v}|' "$CONF"
         else
           printf '%s\n' '${k}=${v}' >> "$CONF"
         fi
-      '') ({ host = cfg.host; name = cfg.name; } // cfg.ampConf))}
+      '') ({ name = cfg.name; } // cfg.ampConf))}
     '';
 
     # === konea: runs as daemon with -start ===
