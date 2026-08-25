@@ -248,36 +248,74 @@ in
     # text into the activation script derivation in /nix/store (world
     # readable, cached, copied on `nix copy`) -- fine for non-secret values
     # like `host`, but defeats the point of a secret if `hostFile` is used.
-    system.activationScripts.kace-ampconf = ''
-      mkdir -p "${cfg.dataDir}"
-      CONF="${cfg.dataDir}/amp.conf"
-      touch "$CONF"
+    #
+    # When hostFile is used, this script must run AFTER sops-nix has
+    # decrypted secrets to /run/secrets/, not before. NixOS activation
+    # scripts have no default ordering guarantee -- observed in production
+    # (2026-08-25): kace-ampconf ran before setupSecrets, so
+    # `cat "${cfg.hostFile}"` hit "No such file or directory" and failed the
+    # whole activation.
+    #
+    # `setupSecrets` only exists when sops-nix is imported AND declares at
+    # least one regular secret AND is not using `useSystemdActivation`
+    # (see sops-nix modules/sops/default.nix). Referencing a nonexistent
+    # activation-script name in `deps` is a hard eval error ("attribute
+    # 'setupSecrets' missing"), so the dependency must be conditional on it
+    # actually existing -- this module has no hard dependency on sops-nix
+    # (host= works with a plain string with no secrets involved at all).
+    system.activationScripts.kace-ampconf =
+      let
+        kaceAmpconfScript = ''
+          mkdir -p "${cfg.dataDir}"
+          CONF="${cfg.dataDir}/amp.conf"
+          touch "$CONF"
 
-      ${
-        if cfg.hostFile != null then ''
-          HOST_VALUE="$(cat "${cfg.hostFile}")"
-          if ${pkgs.gnugrep}/bin/grep -q "^host=" "$CONF"; then
-            ${pkgs.gnused}/bin/sed -i "s|^host=.*|host=$HOST_VALUE|" "$CONF"
-          else
-            printf 'host=%s\n' "$HOST_VALUE" >> "$CONF"
-          fi
-        '' else ''
-          if ${pkgs.gnugrep}/bin/grep -q "^host=" "$CONF"; then
-            ${pkgs.gnused}/bin/sed -i 's|^host=.*|host=${cfg.host}|' "$CONF"
-          else
-            printf 'host=%s\n' '${cfg.host}' >> "$CONF"
-          fi
-        ''
-      }
+          ${
+            if cfg.hostFile != null then ''
+              HOST_VALUE="$(cat "${cfg.hostFile}")"
+              if ${pkgs.gnugrep}/bin/grep -q "^host=" "$CONF"; then
+                ${pkgs.gnused}/bin/sed -i "s|^host=.*|host=$HOST_VALUE|" "$CONF"
+              else
+                printf 'host=%s\n' "$HOST_VALUE" >> "$CONF"
+              fi
+            '' else ''
+              if ${pkgs.gnugrep}/bin/grep -q "^host=" "$CONF"; then
+                ${pkgs.gnused}/bin/sed -i 's|^host=.*|host=${cfg.host}|' "$CONF"
+              else
+                printf 'host=%s\n' '${cfg.host}' >> "$CONF"
+              fi
+            ''
+          }
 
-      ${concatStringsSep "\n" (mapAttrsToList (k: v: ''
-        if ${pkgs.gnugrep}/bin/grep -q "^${k}=" "$CONF"; then
-          ${pkgs.gnused}/bin/sed -i 's|^${k}=.*|${k}=${v}|' "$CONF"
-        else
-          printf '%s\n' '${k}=${v}' >> "$CONF"
-        fi
-      '') ({ name = cfg.name; } // cfg.ampConf))}
-    '';
+          ${concatStringsSep "\n" (mapAttrsToList (k: v: ''
+            if ${pkgs.gnugrep}/bin/grep -q "^${k}=" "$CONF"; then
+              ${pkgs.gnused}/bin/sed -i 's|^${k}=.*|${k}=${v}|' "$CONF"
+            else
+              printf '%s\n' '${k}=${v}' >> "$CONF"
+            fi
+          '') ({ name = cfg.name; } // cfg.ampConf))}
+        '';
+        # Only depend on setupSecrets if it actually exists: sops-nix
+        # imported, has >=1 regular (non-neededForUsers) secret, and is not
+        # using useSystemdActivation (mirrors sops-nix's own condition for
+        # defining system.activationScripts.setupSecrets -- see sops-nix
+        # modules/sops/default.nix). Referencing a nonexistent
+        # activation-script name in `deps` is a hard eval error, and this
+        # module has no hard dependency on sops-nix (host= needs no secrets
+        # at all).
+        #
+        # Deliberately checks config.sops.* (a disjoint part of the config
+        # tree) rather than `config.system.activationScripts ? setupSecrets`:
+        # the latter forces evaluating the merged activationScripts attrset,
+        # which includes kace-ampconf's own value -- infinite recursion.
+        hasSetupSecrets =
+          (config ? sops)
+          && (lib.filterAttrs (_: v: !(v.neededForUsers or false)) (config.sops.secrets or { }) != { })
+          && !(config.sops.useSystemdActivation or false);
+      in
+        if cfg.hostFile != null && hasSetupSecrets
+        then lib.stringAfter [ "setupSecrets" ] kaceAmpconfScript
+        else kaceAmpconfScript;
 
     # === konea: runs as daemon with -start ===
     systemd.services.konea = {
