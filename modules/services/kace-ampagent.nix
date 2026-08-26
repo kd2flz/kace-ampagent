@@ -62,22 +62,6 @@ let
     fi
   '';
 
-  # Wrapper for the 10-min konea checker. AMPWatchDog -k revives konea (it
-  # detects systemd and does `systemctl start konea`), but it does NOT restart
-  # KSchedulerConsole, which also dies on an SMA agent-reset (RESETAGENT stops
-  # both, so Restart=always never fires). konea has no scheduler code of its
-  # own, so without KSchedulerConsole scheduled inventory/scripts silently stop.
-  # KACE's own AMPctl starts both konea and KSchedulerConsole together, so we
-  # mirror that here.
-  koneaCheckerScript = pkgs.writeShellScript "kace-konea-checker" ''
-    set +e
-    ${kaceBinDir}/AMPWatchDog -k
-    if ! ${pkgs.systemd}/bin/systemctl is-active --quiet kschedulerconsole.service; then
-      echo "konea-checker: KSchedulerConsole not running, starting it"
-      ${pkgs.systemd}/bin/systemctl start kschedulerconsole.service
-    fi
-  '';
-
   # Script that re-applies NixOS-managed keys to amp.conf.
   # Runs after a delay so it fires after KBOX pushes its config on connect,
   # which would otherwise clobber keys we set at activation time.
